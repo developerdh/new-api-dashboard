@@ -1,0 +1,5 @@
+# 文本统一按 LF 入库；检出跟随 git 默认
+* text=auto
+*.png binary
+*.jpg binary
+*.woff binary
