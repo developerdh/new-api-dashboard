@@ -17,3 +17,7 @@
 | BE-M1-04 | GET /api/users/ranking 用户消耗排行 | M1 | 2026-11-11 | LH-05 |
 | BE-M1-05 | 单用户统计 API（overview/trend/models） | M1 | 2026-11-11 | LH-05 |
 | BE-M1-06 | 模型统计 API（ranking/trend/cross） | M1 | 2026-11-11 | LH-05；LH-06 |
+| FE-M2-01 | 看板骨架与共享 UI（主题/布局/时间选择器/图表封装） | M2 | 2026-11-11 | 无（LH-01 已闭环） |
+| FE-M2-02 | 全局总览页 /dashboard（指标卡/趋势/排行/热力图） | M2 | 2026-11-11 | LH-05；LH-07 |
+| FE-M2-03 | 用户详情页 /users/[id] | M2 | 2026-11-11 | LH-05；LH-07 |
+| FE-M2-04 | 模型分析页 /models（排行/趋势/交叉） | M2 | 2026-11-11 | LH-05；LH-06；LH-07 |
