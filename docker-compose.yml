@@ -1,0 +1,62 @@
+# New API Dashboard —— docker compose（INF-M4-01）
+#
+# 使用（先准备 .env：cp .env.example .env 并填写 DATABASE_URL/ADMIN_TOKEN）：
+#   docker compose up -d --build
+#   curl http://localhost:3000/api/health
+#
+# 快照能力（Playwright + chromium，镜像体积大）：
+#   DASHBOARD_TARGET=runner-snapshot docker compose up -d --build
+#
+# 演示库（可选 profile，初始化 scripts/seed-demo.sql）：
+#   docker compose --profile demo up -d --build
+#   然后在 .env 使用 DATABASE_URL=postgres://demo:demo@demo-db:5432/new_api_demo
+#
+# 注意：本机无 Docker，以上命令未在本仓库环境实机验证（LH-09）。
+
+services:
+  dashboard:
+    build:
+      context: .
+      target: ${DASHBOARD_TARGET:-runner}
+    image: new-api-dashboard:local
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Shanghai
+      DASHBOARD_BASE_URL: http://127.0.0.1:3000
+    ports:
+      - "3000:3000"
+    volumes:
+      # 快照产物持久化（不入库；BE-M4-02 起由受保护路由读取）
+      - ./data/snapshots:/app/data/snapshots
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  demo-db:
+    image: postgres:16-alpine
+    profiles: ["demo"]
+    environment:
+      POSTGRES_DB: new_api_demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      TZ: Asia/Shanghai
+    volumes:
+      - ./scripts/seed-demo.sql:/docker-entrypoint-initdb.d/seed-demo.sql:ro
+      - demo-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d new_api_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  demo-db-data:

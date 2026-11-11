@@ -73,9 +73,17 @@ export interface TrendLineProps {
   comparePoints?: Array<TrendPoint | null>;
   metric: TrendMetric;
   height?: number | string;
+  /** 导出文件名 scope（FE-M3-02）。 */
+  exportName?: string;
 }
 
-export function TrendLine({ points, comparePoints, metric, height = 300 }: TrendLineProps) {
+export function TrendLine({
+  points,
+  comparePoints,
+  metric,
+  height = 300,
+  exportName = "trend",
+}: TrendLineProps) {
   const option = useMemo(
     () => buildTrendOption(points, comparePoints, metric),
     [comparePoints, metric, points],
@@ -88,6 +96,7 @@ export function TrendLine({ points, comparePoints, metric, height = 300 }: Trend
       empty={points.length === 0}
       emptyMessage="所选区间暂无趋势数据"
       ariaLabel="消耗趋势图"
+      exportName={exportName}
     />
   );
 }

@@ -71,6 +71,7 @@ export function UserRankingBar({ rows, onSelect, height }: UserRankingBarProps) 
       emptyMessage="所选区间暂无排行数据"
       ariaLabel="用户消耗排行"
       onEvents={onEvents}
+      exportName="users-ranking"
     />
   );
 }

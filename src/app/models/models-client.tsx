@@ -203,8 +203,13 @@ export function ModelsClient() {
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">
           <h2 className="text-sm font-medium">模型排行</h2>
           <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="outline" disabled title="BE-M3-01 提供导出">
-              导出 CSV
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={`/api/export/csv?dataset=modelsRanking&start=${range.start}&end=${range.end}&limit=${RANKING_FETCH_LIMIT}`}
+                download
+              >
+                导出 CSV
+              </a>
             </Button>
           </div>
         </div>
@@ -221,6 +226,7 @@ export function ModelsClient() {
               empty={rankingRows.length === 0}
               emptyMessage="所选区间暂无模型数据"
               ariaLabel="模型消耗排行"
+              exportName="models-ranking"
             />
           </SectionBody>
         </div>
@@ -319,6 +325,7 @@ export function ModelsClient() {
               empty={(trendApi.data?.series.length ?? 0) === 0}
               emptyMessage="所选模型暂无可展示的趋势"
               ariaLabel="模型消耗趋势"
+              exportName="models-trend"
             />
           </SectionBody>
         </div>

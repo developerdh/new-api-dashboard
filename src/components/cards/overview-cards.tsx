@@ -50,7 +50,7 @@ function Sparkline({ values }: { values: number[] }) {
   );
 
   if (values.length < 2) return null;
-  return <EChart option={option} height={40} ariaLabel="迷你趋势" />;
+  return <EChart option={option} height={40} ariaLabel="迷你趋势" exportable={false} />;
 }
 
 function deltaOf(

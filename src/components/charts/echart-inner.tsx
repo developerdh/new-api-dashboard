@@ -1,6 +1,6 @@
 "use client";
 
-/** ECharts 实际渲染层（FE-M2-01/02）：仅在客户端加载，负责 resize、主题联动与事件绑定。 */
+/** ECharts 实际渲染层（FE-M2-01/02/03）：仅在客户端加载，负责 resize、主题联动、事件与实例回传。 */
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 
@@ -12,6 +12,8 @@ export interface EChartInnerProps {
   className?: string;
   ariaLabel?: string;
   onEvents?: Record<string, (params: unknown) => void>;
+  /** 实例就绪/销毁回传（导出用）。 */
+  onReady?: (chart: echarts.ECharts | null) => void;
 }
 
 export default function EChartInner({
@@ -19,11 +21,13 @@ export default function EChartInner({
   className,
   ariaLabel,
   onEvents,
+  onReady,
 }: EChartInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const optionRef = useRef(option);
   const eventsRef = useRef(onEvents);
+  const readyRef = useRef(onReady);
 
   // 初始化一次：resize 监听 + 主题变化时重设 option + 事件绑定
   useEffect(() => {
@@ -32,6 +36,7 @@ export default function EChartInner({
 
     const chart = echarts.init(container, undefined, { renderer: "canvas" });
     chartRef.current = chart;
+    readyRef.current?.(chart);
     chart.setOption(applyChartTheme(optionRef.current, readChartTheme()), { notMerge: true });
 
     const eventNames = Object.keys(eventsRef.current ?? {});
@@ -60,6 +65,7 @@ export default function EChartInner({
     return () => {
       resizeObserver.disconnect();
       themeObserver.disconnect();
+      readyRef.current?.(null);
       chart.dispose();
       chartRef.current = null;
     };
@@ -77,6 +83,11 @@ export default function EChartInner({
   useEffect(() => {
     eventsRef.current = onEvents;
   }, [onEvents]);
+
+  // 实例回传回调更新
+  useEffect(() => {
+    readyRef.current = onReady;
+  }, [onReady]);
 
   return (
     <div

@@ -32,8 +32,8 @@ docs/tasks/
 
 | 指针 | 值 |
 |---|---|
-| `current_task` | BE-M3-01 · GET /api/export/csv 导出（限流） |
-| `next_task` | FE-M3-02 · 前端单图导出（自包含 HTML 模板） |
+| `current_task` | — |
+| `next_task` | — |
 
 > 更新规则：任务完成时 `current_task ← next_task`（或按用户指示/卡内前置关系指定）。只写编号与一句话；需要注意的点写进任务卡，不写在这里。
 
@@ -41,11 +41,6 @@ docs/tasks/
 
 | 编号 | 任务 | 里程碑 | 类型 | 前置任务 | 状态 |
 |---|---|---|---|---|---|
-| BE-M3-01 | GET /api/export/csv 导出（限流） | M3 | 新增 | BE-M1-03、BE-M1-04、BE-M1-06 | todo |
-| FE-M3-02 | 前端单图导出（自包含 HTML 模板） | M3 | 新增 | FE-M2-02 | todo |
-| BE-M3-03 | 服务端看板快照（POST /api/snapshot + Playwright） | M3 | 新增 | FE-M2-02、BE-M0-04 | todo |
-| INF-M4-01 | Docker 化部署（Dockerfile+compose） | M4 | 新增 | FE-M2-02、BE-M3-03 | todo |
-| BE-M4-02 | 访问控制与查询安全收口 | M4 | 新增 | BE-M3-01、BE-M3-03、INF-M4-01 | todo |
 
 > 已完成任务不在本表，见 [`COMPLETED.md`](COMPLETED.md)。前置任务可引用已完成编号（定位方式见 COMPLETED 头注）。
 
@@ -56,8 +51,9 @@ docs/tasks/
 | LH-03 | BE-M0-02 真库连通冒烟未执行（本机无 Docker/PostgreSQL，按用户决定不安装） | BE-M0-02 | 真实库接入时（BE-M1 联调前） | 连接层与 503 降级路径已验收；待补验真库 200 + latencyMs 与只读会话加固生效（只读 SQL 与断言见 `docs/db-schema-notes.md` §8/A.5） |
 | LH-04 | BE-M0-03 真实库结构复验未执行（列/类型/索引/保留区间；schema.ts 候选列待晋升） | BE-M0-03 | 真实库接入时（BE-M1-01 前） | 按 `docs/db-schema-notes.md` §8 清单回填 §3/§4；候选列按 §5.2 晋升；差异成立时走回流 |
 | LH-05 | BE-M1-02 M1 统计数值对数未执行（本机无 PG，无 demo 库/真实库可对比） | BE-M1-02 | 真实库接入时（M1 各 API 联调前） | 用 `docs/方案.md` §5.1–§5.6 手工 SQL 与 API 响应逐项对比数值；注意 quota_data 5 分钟延迟导致请求数/额度存在口径差（响应已注 `meta.source`） |
-| LH-06 | BE-M1-06 `/api/models/cross` 为 §4 清单外增补端点，回流未决 | BE-M1-06 | 用户回流审批（FE-M2-04 联调前） | 批准→`docs/方案.md` §4 增一行并闭环本行；不批准→端点保留但方案不记，或按《回流说明》回滚下线 |
 | LH-07 | M2 页面浏览器交互/视觉验收未执行（环境无浏览器自动化） | FE-M2-02 | M2 收尾前（用户人工验收） | 覆盖主题持久化/跟随系统、URL 刷新还原、图表交互与暗色配色；FE-M2-02 已实现，FE-M2-03/04 完成后统一人工走查 |
+| LH-08 | BE-M3-03 快照依赖 Playwright/chromium 未安装（会话约束禁止新增依赖） | BE-M3-03 | INF-M4-01（Docker 镜像内安装）+ 用户批准依赖 | `pnpm add playwright` + `pnpm exec playwright install chromium` 后跑 POST /api/snapshot 与 `pnpm snapshot`，验证产物离线打开与交互；Docker 镜像内安装步骤由 INF-M4-01 承接 |
+| LH-09 | INF-M4-01 Docker 实机验证未执行（本机无 Docker） | INF-M4-01 | 有 Docker 环境时（部署验收） | 依次验证：`docker build .`、`docker compose up` 后 `/api/health` 200、容器内时区、`runner-snapshot` 目标下 POST /api/snapshot 产出、镜像体积记录；同时闭环 LH-08 |
 <!-- 登记与闭环规则见 AGENTS.md「遗留处理机制」；闭环=删行 -->
 
 ## 6. 权威文档清单（何时读哪个）
@@ -89,3 +85,9 @@ docs/tasks/
 | 2026-11-11 | FE-M2-02 完成并归档（/dashboard 指标卡/趋势/热力图/排行 + 环比同比）；单测 218 例通过；浏览器人工验收登记 LH-07；指针推进至 FE-M2-03 |
 | 2026-11-11 | FE-M2-03 完成并归档（/users/[id] 六区块：总览/趋势/模型环图/Token 占比/热力图/最近记录 + 分页与空态）；单测 218 例通过；指针推进至 FE-M2-04 |
 | 2026-11-11 | FE-M2-04 完成并归档（/models：模型排行图/表 + 多模型趋势 + 交叉堆叠 + dataZoom）；模型多选上限单测；单测 224 例通过；指针推进至 BE-M3-01 |
+| 2026-11-11 | BE-M3-01 完成并归档（/api/export/csv 四数据集 + CSV BOM/转义 + 60s/10 次限流 429）；单测 240 例、e2e 500/400/429 通过；指针推进至 FE-M3-02 |
+| 2026-11-11 | FE-M3-02 完成并归档（自包含 HTML 单图导出 + 本地 echarts 运行时端点，离线可交互）；单测 248 例、runtime e2e 通过；指针推进至 BE-M3-03 |
+| 2026-11-11 | BE-M3-03 完成并归档（/api/snapshot + CLI + 队列/白名单，Playwright 可选依赖缺失时 503）；登记 LH-08（依赖安装）；单测 260 例、e2e 401/503/400 通过；指针推进至 INF-M4-01 |
+| 2026-11-11 | INF-M4-01 完成并归档（多阶段 Dockerfile 双目标 + compose + standalone + demo profile，文件级校验）；本机无 Docker，实机验证登记 LH-09；指针推进至 BE-M4-02 |
+| 2026-11-11 | BE-M4-02 完成并归档（Basic Auth 中间件 + fail-fast + 受保护快照路由 + 六项安全核验）；快照路径回流待批登记 LH-10；单测 272 例、standalone e2e 通过；看板在办清空（M0–M4 全部完成） |
+| 2026-11-11 | 回流批准执行：`docs/方案.md` §4 增 `/api/models/cross`、§8.2 快照路径改 `data/snapshots` + 受保护路由；LH-06/LH-10 闭环删行 |

@@ -16,8 +16,13 @@
 | BE-M1-03 | GET /api/trend 全局趋势（day/week/month + 环比同比） | M1 | 2026-11-11 | LH-05 |
 | BE-M1-04 | GET /api/users/ranking 用户消耗排行 | M1 | 2026-11-11 | LH-05 |
 | BE-M1-05 | 单用户统计 API（overview/trend/models） | M1 | 2026-11-11 | LH-05 |
-| BE-M1-06 | 模型统计 API（ranking/trend/cross） | M1 | 2026-11-11 | LH-05；LH-06 |
+| BE-M1-06 | 模型统计 API（ranking/trend/cross） | M1 | 2026-11-11 | LH-05；LH-06 已闭环 |
 | FE-M2-01 | 看板骨架与共享 UI（主题/布局/时间选择器/图表封装） | M2 | 2026-11-11 | 无（LH-01 已闭环） |
 | FE-M2-02 | 全局总览页 /dashboard（指标卡/趋势/排行/热力图） | M2 | 2026-11-11 | LH-05；LH-07 |
 | FE-M2-03 | 用户详情页 /users/[id] | M2 | 2026-11-11 | LH-05；LH-07 |
-| FE-M2-04 | 模型分析页 /models（排行/趋势/交叉） | M2 | 2026-11-11 | LH-05；LH-06；LH-07 |
+| FE-M2-04 | 模型分析页 /models（排行/趋势/交叉） | M2 | 2026-11-11 | LH-05；LH-06 已闭环；LH-07 |
+| BE-M3-01 | GET /api/export/csv 数据导出（CSV + 限流） | M3 | 2026-11-11 | LH-05 |
+| FE-M3-02 | 前端单图导出（自包含 HTML 模板） | M3 | 2026-11-11 | LH-07 |
+| BE-M3-03 | 服务端看板快照（api/CLI/队列，Playwright 未安装） | M3 | 2026-11-11 | LH-07；LH-08 |
+| INF-M4-01 | Docker 化部署（多阶段 Dockerfile + compose） | M4 | 2026-11-11 | LH-08；LH-09 |
+| BE-M4-02 | 访问控制与查询安全收口（Basic Auth + 受保护快照） | M4 | 2026-11-11 | LH-10 已闭环 |

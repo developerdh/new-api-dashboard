@@ -60,9 +60,10 @@ export function buildModelPieOption(slices: ModelSlice[]): EChartsOption {
 export interface ModelPieProps {
   rows: UserModelRow[];
   height?: number | string;
+  exportName?: string;
 }
 
-export function ModelPie({ rows, height = 260 }: ModelPieProps) {
+export function ModelPie({ rows, height = 260, exportName = "user-models" }: ModelPieProps) {
   const slices = useMemo(() => buildModelSlices(rows), [rows]);
   const option = useMemo(() => buildModelPieOption(slices), [slices]);
 
@@ -73,6 +74,7 @@ export function ModelPie({ rows, height = 260 }: ModelPieProps) {
       empty={slices.length === 0}
       emptyMessage="所选区间暂无模型消耗"
       ariaLabel="模型消耗分布"
+      exportName={exportName}
     />
   );
 }

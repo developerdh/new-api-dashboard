@@ -213,6 +213,7 @@ export function OverviewClient() {
               comparePoints={trendApi.data?.compareSeries}
               metric={metric}
               height={300}
+              exportName="dashboard-trend"
             />
           </SectionBody>
         </div>
@@ -230,7 +231,11 @@ export function OverviewClient() {
               onRetry={heatApi.refresh}
               skeletonHeight={190}
             >
-              <CalendarHeatmap points={heatApi.data?.points ?? []} height={190} />
+              <CalendarHeatmap
+                points={heatApi.data?.points ?? []}
+                height={190}
+                exportName="dashboard-heatmap"
+              />
             </SectionBody>
           </div>
         </Card>
@@ -238,16 +243,26 @@ export function OverviewClient() {
         <Card className="gap-3 py-5">
           <div className="flex items-center justify-between px-5">
             <h2 className="text-sm font-medium">用户消耗排行</h2>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              aria-expanded={showAllRanking}
-              onClick={() => setShowAllRanking((value) => !value)}
-              disabled={rankingRows.length === 0}
-            >
-              {showAllRanking ? "收起" : "查看全部"}
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button asChild size="sm" variant="ghost">
+                <a
+                  href={`/api/export/csv?dataset=usersRanking&start=${range.start}&end=${range.end}&limit=100`}
+                  download
+                >
+                  导出 CSV
+                </a>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-expanded={showAllRanking}
+                onClick={() => setShowAllRanking((value) => !value)}
+                disabled={rankingRows.length === 0}
+              >
+                {showAllRanking ? "收起" : "查看全部"}
+              </Button>
+            </div>
           </div>
           <div className="px-5">
             <SectionBody

@@ -1,0 +1,37 @@
+# 构建上下文排除项（INF-M4-01）
+node_modules
+.pnpm-store
+.pnpm-cache
+.next
+out
+build
+dist
+coverage
+
+# 版本库与本地配置
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+
+# 敏感配置（运行时经 env_file/环境变量注入）
+.env
+.env.*
+!.env.example
+
+# 文档与测试产物（镜像不含）
+docs
+README.md
+AGENTS.md
+playwright-report
+test-results
+*.log
+*.tsbuildinfo
+
+# 运行时产物
+public/snapshots
+
+# 快照产物（运行时卷挂载）
+data/snapshots

@@ -121,6 +121,7 @@ export function ModelCrossStack({ result, height }: ModelCrossStackProps) {
       empty={rowCount === 0 || (result?.models.length ?? 0) === 0}
       emptyMessage="所选区间暂无可交叉分析的数据"
       ariaLabel="用户与模型交叉分布"
+      exportName="models-cross"
     />
   );
 }

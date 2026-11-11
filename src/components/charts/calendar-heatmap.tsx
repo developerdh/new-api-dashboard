@@ -70,9 +70,14 @@ export function buildCalendarOption(points: TrendPoint[], theme: ChartTheme): EC
 export interface CalendarHeatmapProps {
   points: TrendPoint[];
   height?: number | string;
+  exportName?: string;
 }
 
-export function CalendarHeatmap({ points, height = 190 }: CalendarHeatmapProps) {
+export function CalendarHeatmap({
+  points,
+  height = 190,
+  exportName = "heatmap",
+}: CalendarHeatmapProps) {
   const { resolvedTheme } = useTheme();
   // 主题切换后 class 已先写入 DOM，需重读 CSS 变量再重建 option
   // eslint-disable-next-line react-hooks/exhaustive-deps -- resolvedTheme 仅用于触发重读，readChartTheme 内部读取 DOM
@@ -86,6 +91,7 @@ export function CalendarHeatmap({ points, height = 190 }: CalendarHeatmapProps) 
       empty={points.length === 0}
       emptyMessage="暂无热力图数据"
       ariaLabel="每日消耗日历热力图"
+      exportName={exportName}
     />
   );
 }

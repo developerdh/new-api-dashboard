@@ -145,9 +145,19 @@ export function UserClient({ userId }: { userId: string }) {
             用户 ID <span className="font-mono">{userId}</span> · 区间内单用户消耗与使用明细
           </p>
         </div>
-        <Button asChild size="sm" variant="ghost">
-          <Link href={backHref}>返回总览</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild size="sm" variant="outline">
+            <a
+              href={`/api/export/csv?dataset=userModels&userId=${encodeURIComponent(userId)}&start=${range.start}&end=${range.end}`}
+              download
+            >
+              导出模型 CSV
+            </a>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <Link href={backHref}>返回总览</Link>
+          </Button>
+        </div>
       </header>
 
       <TimeRangePicker />
@@ -214,6 +224,7 @@ export function UserClient({ userId }: { userId: string }) {
               points={trendApi.data?.points ?? []}
               metric={metric}
               height={280}
+              exportName="user-trend"
             />
           </SectionBody>
         </div>
@@ -267,7 +278,11 @@ export function UserClient({ userId }: { userId: string }) {
             onRetry={heatApi.refresh}
             skeletonHeight={190}
           >
-            <CalendarHeatmap points={heatApi.data?.points ?? []} height={190} />
+            <CalendarHeatmap
+              points={heatApi.data?.points ?? []}
+              height={190}
+              exportName="user-heatmap"
+            />
           </SectionBody>
         </div>
       </Card>
