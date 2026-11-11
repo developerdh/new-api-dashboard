@@ -11,3 +11,9 @@
 | BE-M0-02 | 数据库连接层（pg + Kysely + 只读守卫 + /api/health） | M0 | 2026-10-12 | LH-03 |
 | BE-M0-03 | 数据源核验与 schema 口径（db-schema-notes + 只读 SQL 清单） | M0 | 2026-11-10 | LH-03；LH-04 |
 | BE-M0-04 | 进程内缓存基座（lru-cache 1GB + 分级 TTL + 防慢泄漏） | M0 | 2026-11-10 | 无 |
+| BE-M1-01 | 查询公共基座（Zod 参数 / 时间语义 / 错误格式 / getOrCache 接入） | M1 | 2026-11-10 | 无 |
+| BE-M1-02 | GET /api/overview 全局总览 | M1 | 2026-11-11 | LH-05 |
+| BE-M1-03 | GET /api/trend 全局趋势（day/week/month + 环比同比） | M1 | 2026-11-11 | LH-05 |
+| BE-M1-04 | GET /api/users/ranking 用户消耗排行 | M1 | 2026-11-11 | LH-05 |
+| BE-M1-05 | 单用户统计 API（overview/trend/models） | M1 | 2026-11-11 | LH-05 |
+| BE-M1-06 | 模型统计 API（ranking/trend/cross） | M1 | 2026-11-11 | LH-05；LH-06 |

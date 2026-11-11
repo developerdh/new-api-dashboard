@@ -32,8 +32,8 @@ docs/tasks/
 
 | 指针 | 值 |
 |---|---|
-| `current_task` | BE-M1-01 · 查询公共基座（Zod 参数/时间语义/错误格式/getOrCache） |
-| `next_task` | BE-M1-02 · GET /api/overview 全局总览 |
+| `current_task` | FE-M2-01 · 看板骨架与共享 UI（主题/布局/时间选择器/图表封装） |
+| `next_task` | FE-M2-02 · 全局总览页 /dashboard（指标卡/趋势/排行/热力图） |
 
 > 更新规则：任务完成时 `current_task ← next_task`（或按用户指示/卡内前置关系指定）。只写编号与一句话；需要注意的点写进任务卡，不写在这里。
 
@@ -41,12 +41,6 @@ docs/tasks/
 
 | 编号 | 任务 | 里程碑 | 类型 | 前置任务 | 状态 |
 |---|---|---|---|---|---|
-| BE-M1-01 | 查询公共基座（Zod 参数/时间语义/错误格式/getOrCache） | M1 | 新增 | BE-M0-02、BE-M0-04 | todo |
-| BE-M1-02 | GET /api/overview 全局总览 | M1 | 新增 | BE-M1-01 | todo |
-| BE-M1-03 | GET /api/trend 全局趋势（day/week/month） | M1 | 新增 | BE-M1-01 | todo |
-| BE-M1-04 | GET /api/users/ranking 用户排行 | M1 | 新增 | BE-M1-01 | todo |
-| BE-M1-05 | 单用户统计 API（overview/trend/models） | M1 | 新增 | BE-M1-01、BE-M1-03、BE-M1-04 | todo |
-| BE-M1-06 | 模型统计 API（ranking/trend/cross） | M1 | 新增 | BE-M1-01、BE-M1-03、BE-M1-04 | todo |
 | FE-M2-01 | 看板骨架与共享 UI（主题/布局/时间选择器/图表封装） | M2 | 新增 | INF-M0-01 | todo |
 | FE-M2-02 | 全局总览页 /dashboard（指标卡/趋势/排行/热力图） | M2 | 新增 | FE-M2-01、BE-M1-02、BE-M1-03、BE-M1-04 | todo |
 | FE-M2-03 | 用户详情页 /users/[id] | M2 | 新增 | FE-M2-01、BE-M1-05 | todo |
@@ -66,6 +60,8 @@ docs/tasks/
 | LH-01 | Tremor v3 主题 token 在 Tailwind v4 下的映射 | INF-M0-01 | FE-M2-01（主题与共享 UI） | `tremor-*`/`dark-tremor-*` 约 25 组 token 需 `@theme` 映射；peer 声明 react ^18 已用 pnpm.peerDependencyRules 放行，DatePicker 运行期兼容未验证 |
 | LH-03 | BE-M0-02 真库连通冒烟未执行（本机无 Docker/PostgreSQL，按用户决定不安装） | BE-M0-02 | 真实库接入时（BE-M1 联调前） | 连接层与 503 降级路径已验收；待补验真库 200 + latencyMs 与只读会话加固生效（只读 SQL 与断言见 `docs/db-schema-notes.md` §8/A.5） |
 | LH-04 | BE-M0-03 真实库结构复验未执行（列/类型/索引/保留区间；schema.ts 候选列待晋升） | BE-M0-03 | 真实库接入时（BE-M1-01 前） | 按 `docs/db-schema-notes.md` §8 清单回填 §3/§4；候选列按 §5.2 晋升；差异成立时走回流 |
+| LH-05 | BE-M1-02 M1 统计数值对数未执行（本机无 PG，无 demo 库/真实库可对比） | BE-M1-02 | 真实库接入时（M1 各 API 联调前） | 用 `docs/方案.md` §5.1–§5.6 手工 SQL 与 API 响应逐项对比数值；注意 quota_data 5 分钟延迟导致请求数/额度存在口径差（响应已注 `meta.source`） |
+| LH-06 | BE-M1-06 `/api/models/cross` 为 §4 清单外增补端点，回流未决 | BE-M1-06 | 用户回流审批（FE-M2-04 联调前） | 批准→`docs/方案.md` §4 增一行并闭环本行；不批准→端点保留但方案不记，或按《回流说明》回滚下线 |
 <!-- 登记与闭环规则见 AGENTS.md「遗留处理机制」；闭环=删行 -->
 
 ## 6. 权威文档清单（何时读哪个）
@@ -87,3 +83,9 @@ docs/tasks/
 | 2026-10-12 | BE-M0-02 完成并归档（连接层 + `/api/health`，实测未配置库时 503 降级）；真库连通冒烟环境受限，登记 LH-03 并移交 BE-M0-03；指针推进至 BE-M0-03 |
 | 2026-11-10 | BE-M0-03 完成并归档（db-schema-notes 核验框架 + 三份只读 SQL 清单 + schema.ts 候选列隔离）；无可用数据库，结构复验登记 LH-04、LH-03 随行移交；指针推进至 BE-M0-04 |
 | 2026-11-10 | BE-M0-04 完成并归档（缓存基座 + 分级 TTL + 管理端点守卫 + instrumentation）；单测 60 例与生产模式 e2e 通过；指针推进至 BE-M1-01 |
+| 2026-11-10 | BE-M1-01 完成并归档（查询公共基座：Zod 归一/时区边界/环比同比/统一响应/缓存接入）；单测 87 例通过；指针推进至 BE-M1-02 |
+| 2026-11-11 | BE-M1-02 完成并归档（/api/overview：§5.1 聚合 + logs 请求数 + 60s 缓存 + meta.source）；无库数值对数登记 LH-05；指针推进至 BE-M1-03 |
+| 2026-11-11 | BE-M1-03 完成并归档（/api/trend：三粒度桶 + logs 请求数合并 + compare prev/yoy + 动态 TTL）；单测 140 例通过；指针推进至 BE-M1-04 |
+| 2026-11-11 | BE-M1-04 完成并归档（/api/users/ranking：§5.7 聚合 + 改名名称策略 + 请求数二次查询 + limit 收紧 + 120s 缓存）；单测 158 例通过；指针推进至 BE-M1-05 |
+| 2026-11-11 | BE-M1-05 完成并归档（单用户 overview/trend/models：活跃天数、30s 缓存、模型占比、最近 50 条）；单测 179 例通过；指针推进至 BE-M1-06 |
+| 2026-11-11 | BE-M1-06 完成并归档（模型 ranking/trend/cross：平均成本、models 过滤、Top10 矩阵 + others）；cross 回流待批登记 LH-06；单测 201 例通过；指针推进至 FE-M2-01 |
