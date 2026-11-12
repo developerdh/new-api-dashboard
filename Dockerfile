@@ -22,7 +22,11 @@ WORKDIR /app
 # 依赖层：完整依赖（含 dev，供构建阶段使用）
 FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# 可选 npm 源：国内网络可传 --build-arg NPM_REGISTRY=https://registry.npmmirror.com 加速
+ARG NPM_REGISTRY=""
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    if [ -n "$NPM_REGISTRY" ]; then pnpm config set registry "$NPM_REGISTRY"; fi \
+ && pnpm install --frozen-lockfile
 
 # 构建层：生成 .next/standalone（next.config.ts 已开 output: "standalone"）
 FROM base AS build
@@ -39,37 +43,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 RUN npm install -g playwright@1.49.1 \
  && playwright install --with-deps chromium
-
-# 默认运行镜像
-FROM node:22-slim AS runner
-WORKDIR /app
-ENV NODE_ENV=production \
-    TZ=Asia/Shanghai \
-    PORT=3088 \
-    HOSTNAME=0.0.0.0 \
-    DASHBOARD_BASE_URL=http://127.0.0.1:3088 \
-    SNAPSHOT_DIR=/app/data/snapshots \
-    NEXT_TELEMETRY_DISABLED=1
-
-RUN groupadd --system --gid 1001 nodejs \
- && useradd --system --uid 1001 --gid nodejs nextjs
-
-COPY --from=build /app/public ./public
-COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
-# /api/echarts/runtime 直接读取该文件（standalone 的依赖追踪不包含它）
-COPY --from=build --chown=nextjs:nodejs /app/node_modules/echarts/dist/echarts.min.js ./node_modules/echarts/dist/echarts.min.js
-
-RUN mkdir -p /app/data/snapshots \
- && chown -R nextjs:nodejs /app/data /app/public
-
-USER nextjs
-EXPOSE 3088
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3088/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
-
-CMD ["node", "server.js"]
 
 # 含快照能力的运行镜像（chromium + 系统依赖 + playwright 包）
 FROM snapshot-base AS runner-snapshot
@@ -96,6 +69,39 @@ COPY --from=snapshot-base /usr/local/lib/node_modules/playwright-core ./node_mod
 
 RUN mkdir -p /app/data/snapshots \
  && chown -R nextjs:nodejs /app
+
+USER nextjs
+EXPOSE 3088
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3088/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "server.js"]
+
+# 默认运行镜像。
+# 必须保持在文件最后：`docker build` 未指定 --target 时构建最后一个 stage，
+# 置于末尾才能让默认产物是本镜像（不含浏览器）。
+FROM node:22-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production \
+    TZ=Asia/Shanghai \
+    PORT=3088 \
+    HOSTNAME=0.0.0.0 \
+    DASHBOARD_BASE_URL=http://127.0.0.1:3088 \
+    SNAPSHOT_DIR=/app/data/snapshots \
+    NEXT_TELEMETRY_DISABLED=1
+
+RUN groupadd --system --gid 1001 nodejs \
+ && useradd --system --uid 1001 --gid nodejs nextjs
+
+COPY --from=build /app/public ./public
+COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+# /api/echarts/runtime 直接读取该文件（standalone 的依赖追踪不包含它）
+COPY --from=build --chown=nextjs:nodejs /app/node_modules/echarts/dist/echarts.min.js ./node_modules/echarts/dist/echarts.min.js
+
+RUN mkdir -p /app/data/snapshots \
+ && chown -R nextjs:nodejs /app/data /app/public
 
 USER nextjs
 EXPOSE 3088

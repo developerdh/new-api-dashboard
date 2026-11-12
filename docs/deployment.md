@@ -68,6 +68,15 @@ docker build -t new-api-dashboard:<tag> .
 docker build --target runner-snapshot -t new-api-dashboard:<tag>-snapshot .
 ```
 
+未指定 `--target` 时构建最后一个 stage，即 `runner`（不含浏览器）。实测体积 271 MB。
+
+国内网络建议指定 npm 源，否则依赖下载可能极慢：
+
+```bash
+docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+  -t new-api-dashboard:<tag> .
+```
+
 镜像特性：
 
 - 非 root 运行，用户 `nextjs`（uid/gid 1001）。
