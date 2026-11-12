@@ -15,7 +15,9 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ChartExportButton } from "@/components/charts/chart-export-button";
 import { GranularitySwitch } from "@/components/charts/granularity-switch";
 import { EChart } from "@/components/charts/EChart";
+import { MetricSwitch } from "@/components/charts/metric-switch";
 import { ModelCrossStack } from "@/components/charts/model-cross-stack";
+import { TREND_METRICS, type TrendMetric } from "@/components/charts/trend-line";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -43,6 +45,7 @@ import type {
 
 const RANKING_FETCH_LIMIT = 100;
 const CROSS_USER_LIMIT = 20;
+const MODEL_RANKING_CHART_LIMIT = 10;
 
 type RankingSortKey = "totalQuota" | "avgCost";
 
@@ -83,18 +86,31 @@ function SectionBody({
   return <>{children}</>;
 }
 
-/** 模型排行横向柱状（按消耗）。 */
-function buildModelRankingOption(rows: ModelRankingRow[]): EChartsOption {
+/** 模型排行横向柱状：坐标轴 / 柱标签 / tooltip 统一按所选维度格式化，并按该维度降序。 */
+function formatRankingValue(metric: TrendMetric, value: number): string {
+  return metric === "totalQuota" ? formatQuota(value) : formatCompactNumber(value);
+}
+
+export function buildModelRankingOption(
+  rows: ModelRankingRow[],
+  metric: TrendMetric = "totalQuota",
+): EChartsOption {
   return {
     grid: { left: 8, right: 80, top: 8, bottom: 8, containLabel: true },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "shadow" },
-      valueFormatter: (value: unknown) => formatQuota(Number(value)),
+      formatter: (params: unknown): string => {
+        const items = Array.isArray(params) ? params : [params];
+        const first = items[0] as { dataIndex?: number; value?: unknown } | undefined;
+        const row = rows[first?.dataIndex ?? -1];
+        const name = row === undefined ? "" : row.modelName;
+        return `${name}<br/>${formatRankingValue(metric, Number(first?.value ?? 0))}`;
+      },
     },
     xAxis: {
       type: "value",
-      axisLabel: { formatter: (value: number) => formatCompactNumber(value) },
+      axisLabel: { formatter: (value: number) => formatRankingValue(metric, value) },
     },
     yAxis: {
       type: "category",
@@ -110,9 +126,10 @@ function buildModelRankingOption(rows: ModelRankingRow[]): EChartsOption {
         label: {
           show: true,
           position: "right",
-          formatter: (params: { value?: unknown }) => formatQuota(Number(params.value ?? 0)),
+          formatter: (params: { value?: unknown }) =>
+            formatRankingValue(metric, Number(params.value ?? 0)),
         },
-        data: rows.map((row) => row.totalQuota),
+        data: rows.map((row) => row[metric]),
       },
     ],
   } as unknown as EChartsOption;
@@ -131,7 +148,7 @@ function buildModelTrendOption(series: ModelTrendResult["series"]): EChartsOptio
     xAxis: { type: "category", boundaryGap: false, data: labels },
     yAxis: {
       type: "value",
-      axisLabel: { formatter: (value: number) => formatCompactNumber(value) },
+      axisLabel: { formatter: (value: number) => formatQuota(value) },
     },
     series: series.map((item) => ({
       name: item.modelName,
@@ -150,6 +167,7 @@ export function ModelsClient() {
 
   const [selectedModels, setSelectedModels] = useState<string[] | null>(null);
   const [sortKey, setSortKey] = useState<RankingSortKey>("totalQuota");
+  const [rankingMetric, setRankingMetric] = useState<TrendMetric>("totalQuota");
 
   const baseQuery = new URLSearchParams({
     start: String(range.start),
@@ -184,6 +202,15 @@ export function ModelsClient() {
     return rows;
   }, [rankingRows, sortKey]);
 
+  // 图表 Top10 随维度重排：切换 Token / 请求数后按该维度取前 10（候选集为 quota 口径 Top100）
+  const chartRows = useMemo(
+    () =>
+      [...rankingRows]
+        .sort((left, right) => right[rankingMetric] - left[rankingMetric])
+        .slice(0, MODEL_RANKING_CHART_LIMIT),
+    [rankingRows, rankingMetric],
+  );
+
   const toggleModel = (modelName: string): void => {
     const next = toggleModelSelection(activeModels, modelName);
     if (next !== activeModels) setSelectedModels(next);
@@ -205,7 +232,13 @@ export function ModelsClient() {
       <Card className="gap-4 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">
           <h2 className="text-sm font-semibold">模型排行</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <MetricSwitch
+              options={TREND_METRICS}
+              value={rankingMetric}
+              onChange={setRankingMetric}
+              label="排行统计维度"
+            />
             <Button
               asChild
               size="icon"
@@ -232,8 +265,8 @@ export function ModelsClient() {
             skeletonHeight={240}
           >
             <EChart
-              option={buildModelRankingOption(rankingRows.slice(0, 10))}
-              height={Math.max(220, Math.min(10, rankingRows.length) * 30 + 40)}
+              option={buildModelRankingOption(chartRows, rankingMetric)}
+              height={Math.max(220, chartRows.length * 30 + 40)}
               empty={rankingRows.length === 0}
               emptyMessage="所选区间暂无模型数据"
               ariaLabel="模型消耗排行"
