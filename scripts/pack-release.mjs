@@ -9,7 +9,17 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -42,6 +52,38 @@ cpSync(path.join(root, "public"), path.join(stageDir, "public"), {
   dereference: true,
 });
 
+/**
+ * 把目录内的符号链接替换为真实副本。
+ *
+ * Next 的 standalone 产物会在 `.next/node_modules/<pkg>-<hash>` 放置指向构建机绝对路径的
+ * 符号链接（如 /home/runner/work/.../.next/standalone/node_modules/pg），
+ * `cpSync` 的 dereference 不覆盖这一类，必须显式物化，否则包在其他机器上无法解析。
+ * 目标不存在（悬空链接）时直接删除，避免解压时报错。
+ */
+function materializeSymlinks(dir, stats = { linked: 0, dropped: 0 }) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      let target = null;
+      try {
+        target = realpathSync(full);
+      } catch {
+        target = null;
+      }
+      rmSync(full, { force: true });
+      if (target === null || !existsSync(target)) {
+        stats.dropped += 1;
+        continue;
+      }
+      cpSync(target, full, { recursive: true, dereference: true });
+      stats.linked += 1;
+    } else if (entry.isDirectory()) {
+      materializeSymlinks(full, stats);
+    }
+  }
+  return stats;
+}
+
 /** 递归查找符号链接；发布包不允许存在。 */
 function findSymlinks(dir, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -53,6 +95,11 @@ function findSymlinks(dir, found = []) {
     }
   }
   return found;
+}
+
+const linkStats = materializeSymlinks(stageDir);
+if (linkStats.linked > 0 || linkStats.dropped > 0) {
+  console.log(`[pack] 物化符号链接 ${linkStats.linked} 个，删除悬空链接 ${linkStats.dropped} 个`);
 }
 
 const symlinks = findSymlinks(stageDir);
