@@ -2,6 +2,16 @@
 
 本项目的所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-11-12
+
+### 修复
+
+- **经反向代理、域名或 IP 访问时无法登录（403 `invalid_origin`）**：登录接口的同源校验用
+  `new URL(request.url).origin` 与浏览器 `Origin` 比较，而 Next.js 在 Route Handler 中把
+  `request.url` 解析为服务端自身的监听地址（`http://localhost:<PORT>`），忽略 `Host`。
+  因此除「本地 localhost 直连」外，两者恒不相等。现改为按 `X-Forwarded-Host` → `Host`
+  与 `X-Forwarded-Proto` 解析对外 origin 后再判定，同时保留跨站拦截。
+
 ## [0.1.0] - 2026-11-12
 
 首次公开发布。

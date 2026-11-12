@@ -2,6 +2,7 @@
 import { z } from "zod";
 
 import { createRateLimiter } from "@/lib/rate-limit";
+import { isSameOrigin } from "@/server/request-origin";
 import {
   createSessionToken,
   isSecureRequest,
@@ -33,8 +34,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // 拒绝跨站表单提交（同源请求可无 Origin，故仅在存在且不匹配时拒绝）
+  // 注意：不能直接用 request.url 的 origin——Next 在 Route Handler 中使用服务端监听地址，
+  // 经反向代理或非 localhost 访问时与浏览器 Origin 恒不相等，见 request-origin.ts
   const origin = request.headers.get("origin");
-  if (origin !== null && origin !== new URL(request.url).origin) {
+  if (origin !== null && !isSameOrigin(request, origin)) {
     return json(403, "invalid_origin", "请求来源不被允许");
   }
 
