@@ -8,22 +8,29 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 |---|---|
 | `docs/方案.md` | 技术方案，唯一权威设计 |
 | `docs/db-schema-notes.md` | 数据库实测结构，schema 口径依据 |
+| `docs/deployment.md` | 构建、打包、部署与回滚 |
+| `SECURITY.md` | 漏洞报告渠道与部署安全前提 |
+| `CONTRIBUTING.md` | 开发环境、提交规范、代码红线与 PR 流程 |
+| `CHANGELOG.md` | 版本变更记录（发版时更新） |
 | `README.md` | 安装、配置与部署说明 |
 
 ## 环境与命令
 
-- Node.js ≥ 20，pnpm ≥ 9；包管理器固定 pnpm，提交携带 `pnpm-lock.yaml`。
+- Node.js ≥ 22（`package.json` 的 `engines` 声明），pnpm 10.34.5（`packageManager` 固定）；提交携带 `pnpm-lock.yaml`。
 - 开发地址 `http://localhost:3088`，`/` 跳转 `/dashboard`。
+- `.npmrc` 不入库：Windows 下 Turbopack 需要 `node-linker=hoisted`，属本地环境差异，由开发者自行设置（见 README 常见问题）。
 
 | 命令 | 用途 |
 |---|---|
 | `pnpm install` | 安装依赖 |
 | `pnpm dev` | 开发服务器（3088） |
-| `pnpm build` | 生产构建（standalone） |
+| `pnpm build` | 生产构建（先清空 `.next`，产物为 standalone） |
+| `pnpm clean` | 清空 `.next` |
 | `pnpm start` | 运行生产构建（3088） |
 | `pnpm lint` | ESLint |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm test` | vitest，单测位于 `src/**/*.test.ts` |
+| `pnpm release:pack` | 生成 tar.gz 发布包（需先 `pnpm build`） |
 
 - 构建期不得依赖联网资源（如 `next/font/google`），字体使用 `src/app/globals.css` 的系统字体栈。
 - 环境变量写入 `.env`（不提交），见 `.env.example`；必填 `DATABASE_URL`（只读账号）。
@@ -32,7 +39,7 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 
 - 单一主分支 `main`，小步提交；提交由维护者发起。
 - 提交信息格式：`<type>(<scope>): <subject>`；type ∈ `feat` `fix` `docs` `refactor` `chore` `test`。
-- 禁止提交：`.env`、`node_modules/`、`.next/`、`.pnpm-store/`、`public/snapshots/`、`data/snapshots/`。
+- 禁止提交：`.env`、`node_modules/`、`.next/`、`.pnpm-store/`、`.npmrc`、`dist/`、`public/snapshots/`、`data/snapshots/`。
 
 ## 架构红线
 
