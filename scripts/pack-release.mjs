@@ -28,10 +28,39 @@ rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 
 // 1) standalone 运行时（server.js + node_modules + package.json）
-cpSync(standalone, stageDir, { recursive: true });
+//    dereference：pnpm isolated 布局会在 node_modules 内生成指向 .pnpm 的符号链接，
+//    在 CI 中这些链接是绝对路径（/home/runner/work/...），打进包里后在任何机器上都无法解析。
+//    统一解引用为真实文件，保证包自包含、跨平台可用。
+cpSync(standalone, stageDir, { recursive: true, dereference: true });
 // 2) 静态资源与 public（standalone 不含，需按 Dockerfile 同样方式补齐）
-cpSync(path.join(root, ".next", "static"), path.join(stageDir, ".next", "static"), { recursive: true });
-cpSync(path.join(root, "public"), path.join(stageDir, "public"), { recursive: true });
+cpSync(path.join(root, ".next", "static"), path.join(stageDir, ".next", "static"), {
+  recursive: true,
+  dereference: true,
+});
+cpSync(path.join(root, "public"), path.join(stageDir, "public"), {
+  recursive: true,
+  dereference: true,
+});
+
+/** 递归查找符号链接；发布包不允许存在。 */
+function findSymlinks(dir, found = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      found.push(path.relative(stageDir, full));
+    } else if (entry.isDirectory()) {
+      findSymlinks(full, found);
+    }
+  }
+  return found;
+}
+
+const symlinks = findSymlinks(stageDir);
+if (symlinks.length > 0) {
+  console.error(`[pack] 中止：发布包内存在符号链接 ${symlinks.length} 个，例如：`);
+  for (const link of symlinks.slice(0, 5)) console.error(`  ${link}`);
+  process.exit(1);
+}
 
 // 3) 配置与文档
 const extras = [
