@@ -9,7 +9,8 @@
  * - fail-closed：未配置 `DASHBOARD_AUTH_USER` / `DASHBOARD_AUTH_PASS` 时拒绝请求（503）；
  *   生产环境另有 instrumentation fail-fast 拒绝启动。
  *
- * 说明：中间件运行在 edge runtime，会话校验只用 WebCrypto（见 `src/server/session.ts`）。
+ * 说明：proxy 运行在 edge runtime，会话校验只用 WebCrypto（见 `src/server/session.ts`）。
+ * 文件约定：Next.js 16 起 `middleware` 更名为 `proxy`，导出函数同名。
  */
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -69,7 +70,7 @@ function redirectToLogin(request: NextRequest): NextResponse {
   return NextResponse.redirect(loginUrl);
 }
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
   if (isExempt(pathname)) return NextResponse.next();
 

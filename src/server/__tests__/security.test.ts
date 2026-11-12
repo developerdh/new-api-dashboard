@@ -16,7 +16,7 @@ vi.mock("next/server", async (importOriginal) => {
 import type { NextRequest } from "next/server";
 
 import { GET as getSnapshotFile } from "@/app/api/snapshots/[file]/route";
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 import { EXPORT_RATE_LIMIT } from "@/lib/rate-limit";
 import { cacheKey } from "@/server/cache";
 import {
@@ -80,14 +80,14 @@ describe("登录会话中间件", () => {
       `${SESSION_COOKIE_NAME}=`,
       `${SESSION_COOKIE_NAME}=forged.value`,
     ]) {
-      const response = await middleware(request("/dashboard", cookie));
+      const response = await proxy(request("/dashboard", cookie));
       expect(response.status, String(cookie)).toBe(307);
       expect(response.headers.get("location")).toContain("/login");
     }
   });
 
   it("未登录访问 API → 401 JSON（不返回登录页 HTML）", async () => {
-    const response = await middleware(request("/api/overview?start=1&end=2"));
+    const response = await proxy(request("/api/overview?start=1&end=2"));
     expect(response.status).toBe(401);
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toMatchObject({
@@ -97,7 +97,7 @@ describe("登录会话中间件", () => {
   });
 
   it("有效会话 → 放行（x-middleware-next）", async () => {
-    const response = await middleware(request("/dashboard", await validCookie()));
+    const response = await proxy(request("/dashboard", await validCookie()));
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
@@ -115,13 +115,13 @@ describe("登录会话中间件", () => {
       secret: `${USER}:other`,
     });
     for (const token of [expired, foreign]) {
-      const response = await middleware(request("/dashboard", `${SESSION_COOKIE_NAME}=${token}`));
+      const response = await proxy(request("/dashboard", `${SESSION_COOKIE_NAME}=${token}`));
       expect(response.status).toBe(307);
     }
   });
 
   it("next 只保留站内相对路径", async () => {
-    const response = await middleware(request("/models?start=1&end=2"));
+    const response = await proxy(request("/models?start=1&end=2"));
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("next")).toBe("/models?start=1&end=2");
@@ -139,7 +139,7 @@ describe("登录会话中间件", () => {
       "/api/snapshot",
       "/favicon.ico",
     ]) {
-      const response = await middleware(request(pathname));
+      const response = await proxy(request(pathname));
       expect(response.headers.get("x-middleware-next"), pathname).toBe("1");
     }
   });
@@ -149,13 +149,13 @@ describe("登录会话中间件", () => {
     delete process.env.DASHBOARD_AUTH_USER;
     delete process.env.DASHBOARD_AUTH_PASS;
 
-    const response = await middleware(request("/dashboard", cookie));
+    const response = await proxy(request("/dashboard", cookie));
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   it("快照读取路由受保护（不在豁免清单）", async () => {
-    const response = await middleware(request("/api/snapshots/x.html"));
+    const response = await proxy(request("/api/snapshots/x.html"));
     expect(response.status).toBe(401);
   });
 });
