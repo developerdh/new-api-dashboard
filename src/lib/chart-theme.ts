@@ -25,6 +25,38 @@ const FALLBACK_THEME: ChartTheme = {
   palette: ["#4aa3ff", "#17a9c4", "#a98bee", "#e07bc4", "#3ab584"],
 };
 
+/**
+ * CSS 颜色 → sRGB。`--chart-*` 等变量的计算值是 `lab()` / `oklch()`（Tailwind v4 色彩空间），
+ * ECharts 的 canvas 渲染器无法解析此类色值：色板会静默回落到内置默认色，
+ * `visualMap` 渐变则直接渲染为黑色。用 1×1 canvas 实际绘制后读回像素，得到 sRGB 色值。
+ */
+function toSrgb(color: string): string {
+  if (typeof document === "undefined") return color;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return color;
+
+    // sentinel：若赋值后仍是哨兵值，说明浏览器无法解析该颜色，原样交回
+    const sentinel = "#010203";
+    ctx.fillStyle = sentinel;
+    ctx.fillStyle = color;
+    if (ctx.fillStyle === sentinel && !/#010203/i.test(color)) return color;
+
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    if (a === 255) {
+      return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+    }
+    return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+  } catch {
+    return color;
+  }
+}
+
 /** 从 `<html>` 的 CSS 变量读取当前主题色（客户端调用；SSR 时返回亮色兜底）。 */
 export function readChartTheme(): ChartTheme {
   if (typeof window === "undefined" || typeof getComputedStyle !== "function") {
@@ -33,7 +65,7 @@ export function readChartTheme(): ChartTheme {
   const styles = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string): string => {
     const value = styles.getPropertyValue(name).trim();
-    return value === "" ? fallback : value;
+    return value === "" ? fallback : toSrgb(value);
   };
   const palette = [1, 2, 3, 4, 5].map((index) =>
     read(`--chart-${index}`, FALLBACK_THEME.palette[index - 1] ?? FALLBACK_THEME.foreground),
