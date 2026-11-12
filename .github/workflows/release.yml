@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 校验 tag 与 package.json 版本一致
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 package.json 版本 ${PKG_VERSION} 不一致"
+            exit 1
+          fi
+
+      - name: 生产构建
+        run: pnpm build
+
+      - name: 生成发布包
+        run: pnpm release:pack
+
+      # 发布包内不应包含构建机配置；脚本已断言，这里再做一层校验
+      - name: 校验发布包不含 .env
+        run: |
+          LIST="$(tar -tzf dist/*.tar.gz)"
+          if echo "$LIST" | grep -Eq '(^|/)\.env$'; then
+            echo "::error::发布包内存在 .env"
+            exit 1
+          fi
+          if echo "$LIST" | grep -E '(^|/)\.env\.' | grep -Ev '\.env\.example$'; then
+            echo "::error::发布包内存在 .env.* 文件"
+            exit 1
+          fi
+          echo "$LIST" | grep -Eq '(^|/)\.env\.example$' || { echo "::error::发布包缺少 .env.example"; exit 1; }
+          echo "发布包检查通过"
+
+      - name: 创建 Release 并上传产物
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

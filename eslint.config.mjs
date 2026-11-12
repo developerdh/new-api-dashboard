@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 发布包产物（含编译后的服务端 chunk，非源码）
+    "dist/**",
   ]),
 ]);
 

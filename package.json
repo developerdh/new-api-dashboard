@@ -4,13 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3088",
-    "build": "next build",
+    "clean": "node scripts/clean-next.mjs",
+    "build": "node scripts/clean-next.mjs && next build",
     "start": "next start -p 3088",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "snapshot": "node --experimental-strip-types scripts/snapshot.ts"
+    "snapshot": "node --experimental-strip-types scripts/snapshot.ts",
+    "release:pack": "node scripts/pack-release.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",
@@ -46,6 +48,9 @@
     "vitest": "^5.0.3"
   },
   "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "pnpm": {
     "peerDependencyRules": {
       "allowedVersions": {

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/developerdh/new-api-dashboard/security/advisories/new
+    about: 请勿公开提交安全问题，走私密渠道报告
+  - name: 部署与使用问题
+    url: https://github.com/developerdh/new-api-dashboard/blob/main/docs/deployment.md
+    about: 先查阅部署文档与 README 常见问题

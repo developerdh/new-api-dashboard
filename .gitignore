@@ -30,6 +30,9 @@ test-results/
 Thumbs.db
 *.pem
 
+# 本地包管理器布局覆盖（Windows + Turbopack 需 node-linker=hoisted，属本地环境差异）
+.npmrc
+
 # 工作区助手数据（本地记忆，不入库）
 .workbuddy/
 

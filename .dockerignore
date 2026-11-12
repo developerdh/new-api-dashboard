@@ -25,6 +25,9 @@ coverage
 docs
 README.md
 AGENTS.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
 playwright-report
 test-results
 *.log
