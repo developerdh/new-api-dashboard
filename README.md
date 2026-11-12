@@ -113,6 +113,8 @@ docker compose --profile demo up -d --build
 | [docs/方案.md](docs/方案.md) | 技术方案，唯一权威设计 |
 | [docs/db-schema-notes.md](docs/db-schema-notes.md) | 数据库实测结构与 schema 口径 |
 | [docs/deployment.md](docs/deployment.md) | 构建、打包、部署与回滚 |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | 常见问题排查（按现象索引） |
+| [docs/nginx.example.conf](docs/nginx.example.conf) | 反向代理参考配置 |
 | [SECURITY.md](SECURITY.md) | 漏洞报告与部署安全前提 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 开发环境、提交规范与代码红线 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
@@ -152,6 +154,14 @@ scripts/                      # 演示数据、只读授权 SQL、快照脚本�
 
 ## 常见问题
 
+完整排查手册见 [docs/troubleshooting.md](docs/troubleshooting.md)（按现象索引，含登录 403、反代配置、health 503、快照与构建问题）。
+
+几个最常遇到的：
+
+**经反向代理访问时登录报 403 `invalid_origin`**
+
+0.1.0 及更早版本存在缺陷：同源校验误用了 Next 在 Route Handler 中解析出的服务端地址，导致除 localhost 直连外一律拒绝。升级到 0.1.1 及以上；同时确认 nginx 使用 `proxy_set_header Host $http_host;`（`$host` 会丢端口）。
+
 **Windows 上 `pnpm dev` 报 `Could not find the Next.js package`**
 
 Next.js 16 的 Turbopack 在 Windows 上无法解析 pnpm 默认的 isolated 布局。改为 hoisted：
@@ -169,10 +179,15 @@ pnpm config set node-linker hoisted --location project
 **`/api/health` 返回什么**
 
 ```json
-{ "ok": true, "version": "0.1.0", "db": { "status": "up", "latencyMs": 12 } }
+{
+  "ok": true,
+  "version": "0.1.1",
+  "db": { "status": "up", "latencyMs": 12 },
+  "schema": { "ok": true, "missing": [] }
+}
 ```
 
-`ok` 为 `false` 时返回 503，表示数据库不可达。该端点响应头为 `no-store`。
+`ok` 为 `false` 时返回 503：`db.status` 为 `down` 表示数据库不可达，`schema.missing` 非空表示表结构与查询依赖不一致。响应头为 `no-store`。
 
 ## 许可
 

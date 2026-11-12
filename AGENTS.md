@@ -9,6 +9,8 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 | `docs/方案.md` | 技术方案，唯一权威设计 |
 | `docs/db-schema-notes.md` | 数据库实测结构，schema 口径依据 |
 | `docs/deployment.md` | 构建、打包、部署与回滚 |
+| `docs/troubleshooting.md` | 常见问题排查（按现象索引，含反代与登录问题） |
+| `docs/nginx.example.conf` | 反向代理参考配置（`Host` 必须 `$http_host`） |
 | `SECURITY.md` | 漏洞报告渠道与部署安全前提 |
 | `CONTRIBUTING.md` | 开发环境、提交规范、代码红线与 PR 流程 |
 | `CHANGELOG.md` | 版本变更记录（发版时更新） |

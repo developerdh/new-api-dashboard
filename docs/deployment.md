@@ -181,6 +181,24 @@ curl http://localhost:3088/api/health
 
 将 `.next/standalone`、`.next/static`（置于 `standalone/.next/static`）、`public` 部署至同一目录，以 `node server.js` 启动，交由 systemd 或 PM2 托管。仓库不提供 unit 文件。
 
+### 5.3 反向代理
+
+完整示例见 [nginx.example.conf](nginx.example.conf)，排障见 [troubleshooting.md](troubleshooting.md)。
+
+必须透传的请求头：
+
+| 头 | 值 | 缺失后果 |
+|---|---|---|
+| `Host` | `$http_host` | 同源判定失败（登录 403 `invalid_origin`）、生成的绝对链接错误。用 `$host` 会丢端口 |
+| `X-Forwarded-Proto` | `$scheme` | 会话 Cookie 不带 `Secure`（HTTPS 部署下不安全） |
+| `X-Forwarded-For` | `$proxy_add_x_forwarded_for` | 拿不到真实来源 IP |
+| `X-Forwarded-Host` | `$http_host` | 多级代理时对外主机名失真 |
+
+两条硬约束：
+
+- nginx 的 `listen` 端口**不能**与容器发布到宿主机的端口相同。Linux 下 `0.0.0.0:N` 与 `127.0.0.1:N` 互斥，冲突会让 `reload` 静默失败（仅写 `error.log`，`nginx -t` 仍通过）。
+- 容器内端口保持 `3088`（`HEALTHCHECK` 依赖），只在宿主机侧换映射端口，例如 `127.0.0.1:13088:3088`。
+
 ## 6. 环境变量
 
 | 变量 | 必填 | 说明 |
@@ -206,8 +224,9 @@ curl http://localhost:3088/api/health
 4. **管理端点**：按需配置 `ADMIN_TOKEN`；留空时 `/api/admin/cache/*` 与 `/api/snapshot` 返回 404。
 5. **快照目录**：`SNAPSHOT_DIR` 所在路径对运行用户可写。
 6. **健康检查**：`GET /api/health` 返回 200。该端点探测数据库连通性，失败返回 503。
-7. **反向代理**：终止 TLS 并转发 `X-Forwarded-Proto: https`。会话 Cookie 的 `Secure` 标志依据请求协议或该请求头判定，缺失时不加 `Secure`。
+7. **反向代理**：`Host` 用 `$http_host` 透传（含端口），并转发 `X-Forwarded-Proto: https`。前者决定同源判定与链接生成，后者决定会话 Cookie 是否带 `Secure`。详见 §5.3。
 8. **基础地址**：`DASHBOARD_BASE_URL` 与外部访问地址一致，快照与导出链接据此生成。
+9. **端口映射**：容器内端口固定 `3088`（HEALTHCHECK 依赖），宿主机侧如需换端口只改映射，不要改容器内 `PORT`。
 
 ## 8. 回滚
 

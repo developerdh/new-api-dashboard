@@ -120,6 +120,8 @@ const extras = [
   "CHANGELOG.md",
   "CONTRIBUTING.md",
   "docs/deployment.md",
+  "docs/troubleshooting.md",
+  "docs/nginx.example.conf",
   "docs/db-schema-notes.md",
   "docs/images",
   "scripts/setup-readonly.sql",
