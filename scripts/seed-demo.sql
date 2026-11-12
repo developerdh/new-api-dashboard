@@ -16,7 +16,7 @@
 --        -f scripts/seed-demo.sql
 --
 -- 生成内容（确定性、可重跑）：
---   users      12 行（1 个禁用账号，用于验证状态过滤）
+--   users      12 行（1 个禁用账号用于验证状态过滤，1 个无昵称用于验证账号回落）
 --   quota_data 近 30 天 · 小时桶 · 11 个启用用户 · 每用户每小时 2 个模型 ≈ 1.3 万行
 --   logs       由 quota_data 拆分出的请求级记录 ≈ 3 万行
 -- 全部重跑即重建，不保留旧数据。
@@ -45,10 +45,13 @@ DROP TABLE IF EXISTS users;
 -- 表结构：与 src/server/schema.ts 的 Database 基线一一对应（未复验）
 -- ---------------------------------------------------------------------------
 CREATE TABLE users (
-  id       bigint  PRIMARY KEY,
-  username text    NOT NULL,
-  status   integer NOT NULL DEFAULT 1,   -- 1 = 启用，2 = 禁用（取值口径待真实库确认）
-  quota    bigint  NOT NULL DEFAULT 0
+  id            bigint  PRIMARY KEY,
+  username      text    NOT NULL,
+  display_name  text,                              -- 昵称；NULL/空白时展示层回落账号
+  status        integer NOT NULL DEFAULT 1,        -- 1 = 启用，2 = 禁用（取值口径待真实库确认）
+  quota         bigint  NOT NULL DEFAULT 0,
+  used_quota    bigint  NOT NULL DEFAULT 0,
+  request_count bigint  NOT NULL DEFAULT 0
 );
 
 CREATE TABLE quota_data (
@@ -63,13 +66,15 @@ CREATE TABLE quota_data (
 );
 
 CREATE TABLE logs (
-  user_id           bigint NOT NULL,
-  username          text   NOT NULL,
-  created_at        bigint NOT NULL,     -- Unix 秒
-  model_name        text   NOT NULL,
-  quota             bigint NOT NULL DEFAULT 0,
-  prompt_tokens     bigint NOT NULL DEFAULT 0,
-  completion_tokens bigint NOT NULL DEFAULT 0
+  id                bigint  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id           bigint  NOT NULL,
+  username          text    NOT NULL,
+  created_at        bigint  NOT NULL,     -- Unix 秒
+  type              integer NOT NULL DEFAULT 2,  -- 2 = 消费流水（统计口径只取该类）
+  model_name        text    NOT NULL,
+  quota             bigint  NOT NULL DEFAULT 0,
+  prompt_tokens     bigint  NOT NULL DEFAULT 0,
+  completion_tokens bigint  NOT NULL DEFAULT 0
 );
 
 -- 索引与方案 §2.4 同名（demo 库可同步建；真实库建索引走 scripts/index-suggestions.sql）
@@ -82,22 +87,26 @@ CREATE INDEX idx_logs_user_created        ON logs (user_id, created_at);
 CREATE INDEX idx_logs_model_created       ON logs (model_name, created_at);
 
 -- ---------------------------------------------------------------------------
--- users：12 个账号，id = 11 为禁用账号（无用量数据）
+-- users：12 个账号，id = 11 为禁用账号（无用量数据），id = 12 无昵称（验证账号回落）
 -- ---------------------------------------------------------------------------
-INSERT INTO users (id, username, status, quota)
+INSERT INTO users (id, username, display_name, status, quota, used_quota, request_count)
 SELECT i,
        'demo_user_' || lpad(i::text, 2, '0'),
+       CASE WHEN i = 12 THEN NULL ELSE '演示用户 ' || lpad(i::text, 2, '0') END,
        CASE WHEN i = 11 THEN 2 ELSE 1 END,
-       1000000 - i * 12345
+       1000000 - i * 12345,
+       0,
+       0
 FROM generate_series(1, 12) AS i;
 
 -- ---------------------------------------------------------------------------
--- quota_data：近 30 天 × 小时桶 × 启用用户 × 每用户每小时 2 个模型
+-- quota_data：近 60 天 × 小时桶 × 启用用户 × 每用户每小时 2 个模型
 --   模型 id 1–8 轮转命中，保证「多用户 / 多模型 / 跨日 / 每日活跃用户不固定」
+--   用户 1、2 在 32 天前停止使用，用于构造「上期活跃、本期沉默」清单
 -- ---------------------------------------------------------------------------
 WITH hours AS (
   SELECT generate_series(
-           date_trunc('hour', now()) - interval '29 days',
+           date_trunc('hour', now()) - interval '59 days',
            date_trunc('hour', now()),
            interval '1 hour'
          ) AS h
@@ -123,6 +132,8 @@ picked AS (
         )
     -- 每天约 1/7 的用户无用量：让「活跃用户数」有区分度
     AND ((u.id + extract(day FROM h)::int) % 7 <> 0)
+    -- 用户 1、2 近 32 天无用量：上期有、本期无 → 沉默用户清单
+    AND NOT (u.id IN (1, 2) AND h.h > date_trunc('day', now()) - interval '32 days')
 )
 INSERT INTO quota_data (
   user_id, username, model_name, created_at,
@@ -140,9 +151,21 @@ SELECT
 FROM picked p
 CROSS JOIN LATERAL (
   SELECT
-    300 + ((p.user_id * 73 + p.mid * 151 + extract(hour FROM p.h)::int * 17) % 2400) AS prompt_tokens,
-    round((300 + ((p.user_id * 73 + p.mid * 151 + extract(hour FROM p.h)::int * 17) % 2400))
-          * (0.2 + (p.mid % 4) * 0.1))::bigint AS completion_tokens
+    round(
+      (300 + ((p.user_id * 73 + p.mid * 151 + extract(hour FROM p.h)::int * 17) % 2400))
+      -- 昼夜起伏：工作时间满负荷，凌晨明显回落
+      * (CASE WHEN extract(hour FROM p.h)::int BETWEEN 9 AND 21 THEN 1.0 ELSE 0.18 END)
+      -- 日间波动 + 周末回落：避免按日聚合后趋于平直线
+      * (0.45 + ((p.user_id * 31 + extract(doy FROM p.h)::int * 17 + p.mid * 7) % 56) / 100.0)
+      * (CASE WHEN extract(isodow FROM p.h) >= 6 THEN 0.5 ELSE 1.0 END)
+    )::bigint AS prompt_tokens,
+    round(
+      (300 + ((p.user_id * 73 + p.mid * 151 + extract(hour FROM p.h)::int * 17) % 2400))
+      * (CASE WHEN extract(hour FROM p.h)::int BETWEEN 9 AND 21 THEN 1.0 ELSE 0.18 END)
+      * (0.45 + ((p.user_id * 31 + extract(doy FROM p.h)::int * 17 + p.mid * 7) % 56) / 100.0)
+      * (CASE WHEN extract(isodow FROM p.h) >= 6 THEN 0.5 ELSE 1.0 END)
+      * (0.2 + (p.mid % 4) * 0.1)
+    )::bigint AS completion_tokens
 ) AS s;
 
 -- ---------------------------------------------------------------------------
