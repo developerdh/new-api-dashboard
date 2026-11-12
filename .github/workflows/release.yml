@@ -21,6 +21,12 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # pnpm 默认的 isolated 布局会在 node_modules 内生成符号链接，CI 中是绝对路径
+      # （/home/runner/work/...），打进发布包后在任何机器上都无法解析。
+      # 改用 hoisted 布局从源头消除符号链接；打包脚本另有一层断言兜底。
+      - name: 改用 hoisted 依赖布局
+        run: pnpm config set node-linker hoisted --location project
+
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
 
@@ -54,6 +60,16 @@ jobs:
           echo "$LIST" | grep -Eq '(^|/)\.env\.example$' || { echo "::error::发布包缺少 .env.example"; exit 1; }
           echo "发布包检查通过"
 
+      # 符号链接会让包依赖构建机的绝对路径，任何目标机器都无法解析
+      - name: 校验发布包无符号链接
+        run: |
+          if tar -tvzf dist/*.tar.gz | grep -Eq '^l'; then
+            echo "::error::发布包内存在符号链接"
+            tar -tvzf dist/*.tar.gz | grep -E '^l' | head -5
+            exit 1
+          fi
+          echo "无符号链接"
+
       # 冒烟：发布包必须能直接启动。此步骤没有数据库，health 返回 503 属预期，
       # 只要进程起来并响应 HTTP 即视为通过——验证的是「解压即可运行」而非数据连通。
       - name: 冒烟启动发布包
@@ -79,11 +95,15 @@ jobs:
           kill "$SERVER_PID" 2>/dev/null || true
           echo "冒烟通过"
 
+      # 发布说明：固定区块 + CHANGELOG 中该版本段落，见 scripts/release-notes.mjs
+      - name: 生成发布说明
+        run: node scripts/release-notes.mjs --out dist/RELEASE_NOTES.md
+
       - name: 创建 Release 并上传产物
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
-          generate_release_notes: true
+          body_path: dist/RELEASE_NOTES.md
           fail_on_unmatched_files: true

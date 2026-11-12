@@ -130,6 +130,24 @@ node server.js             # 默认监听 3088
 - 版本号取自 `package.json` 的 `version`，同时经 `next.config.ts` 内联到 `/api/health` 的 `version` 字段。
 - 升级：解压新版本目录、切换软链接或替换目录后重启进程；`data/snapshots` 为外部目录，不受影响。
 - **敏感配置**：`next build` 会把构建机上的 `.env` 复制进 `.next/standalone`。`pnpm release:pack` 已自动剔除并断言；若手工分发 standalone 目录，必须先删除其中的 `.env`。
+- **符号链接**：pnpm 的 isolated 布局会在 `node_modules` 内生成符号链接，CI 环境下是绝对路径（`/home/runner/work/...`），打包后无法在其他机器解析。打包脚本统一解引用为真实文件，并断言包内无符号链接。
+
+### 4.3 发布流程
+
+发布由 tag 触发，GitHub Actions 完成构建与上传：
+
+```bash
+# 1. 更新版本与日志
+#    package.json 的 version、CHANGELOG.md 追加对应版本段落（标题形如 "## [0.1.1] - 2026-11-20"）
+# 2. 提交后打标签（tag 必须与 version 一致，否则工作流失败）
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin main
+git push origin v0.1.1
+```
+
+`Release` 工作流依次执行：校验 tag 与 `version` 一致 → hoisted 布局安装依赖 → 构建 → 打包 → 校验包内无 `.env` 与符号链接 → 解压并冒烟启动 → 生成发布说明 → 创建 Release 并上传 `tar.gz` 与 `.sha256`。
+
+发布说明由 `scripts/release-notes.mjs` 生成：固定区块（下载安装、兼容性、文档）+ `CHANGELOG.md` 中对应版本的段落。**因此 CHANGELOG 的版本段落是发布页内容的唯一来源，发版前必须写。**
 
 ## 5. 部署
 
