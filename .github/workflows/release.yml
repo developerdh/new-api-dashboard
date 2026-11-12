@@ -54,6 +54,31 @@ jobs:
           echo "$LIST" | grep -Eq '(^|/)\.env\.example$' || { echo "::error::发布包缺少 .env.example"; exit 1; }
           echo "发布包检查通过"
 
+      # 冒烟：发布包必须能直接启动。此步骤没有数据库，health 返回 503 属预期，
+      # 只要进程起来并响应 HTTP 即视为通过——验证的是「解压即可运行」而非数据连通。
+      - name: 冒烟启动发布包
+        run: |
+          mkdir -p /tmp/smoke
+          tar -xzf dist/*.tar.gz -C /tmp/smoke
+          cd /tmp/smoke/new-api-dashboard-*
+          DASHBOARD_AUTH_USER=smoke DASHBOARD_AUTH_PASS=smoke PORT=3099 node server.js &
+          SERVER_PID=$!
+          READY=0
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:3099/api/health; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" != "1" ]; then
+            echo "::error::发布包启动后 30 秒内未响应"
+            kill "$SERVER_PID" 2>/dev/null || true
+            exit 1
+          fi
+          echo "健康检查响应："
+          curl -s http://127.0.0.1:3099/api/health || true
+          echo
+          kill "$SERVER_PID" 2>/dev/null || true
+          echo "冒烟通过"
+
       - name: 创建 Release 并上传产物
         uses: softprops/action-gh-release@v2
         with:
