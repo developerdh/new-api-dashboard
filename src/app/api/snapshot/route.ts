@@ -1,5 +1,5 @@
 /**
- * POST /api/snapshot —— 服务端看板快照（BE-M3-03 / 方案 §8.2）。
+ * POST /api/snapshot —— 服务端看板快照（方案 §8.2）。
  *
  * 守卫：`Authorization: Bearer ${ADMIN_TOKEN}`（未配置 = 404，配置后缺失/错误 = 401）。
  * body：`{ path: "/dashboard" | "/models" | "/users/<id>", query?: { start, end, granularity }, name?: string }`

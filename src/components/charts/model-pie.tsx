@@ -1,6 +1,6 @@
 "use client";
 
-/** 单用户模型消耗分布（FE-M2-03）：环形图 Top10 + 其余合并「其他」。 */
+/** 单用户模型消耗分布：环形图 Top10 + 其余合并「其他」。 */
 import type { EChartsOption } from "echarts";
 import { useMemo } from "react";
 

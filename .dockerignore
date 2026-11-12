@@ -1,4 +1,4 @@
-# 构建上下文排除项（INF-M4-01）
+# 构建上下文排除项
 node_modules
 .pnpm-store
 .pnpm-cache

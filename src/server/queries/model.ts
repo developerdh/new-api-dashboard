@@ -1,12 +1,12 @@
 /**
- * 模型统计（BE-M1-06 / 方案 §3.4、§5.6 反向聚合）。
+ * 模型统计（方案 §3.4、§5.6 反向聚合）。
  *
  * - ranking：quota_data 按 model_name 聚合消耗/Token；logs 同名聚合请求数；单次平均成本在 JS 合并计算
  *   （`SUM(quota) / COUNT(logs)`，请求数为 0 时记 0，避免除零）。
  * - trend：`granularity` 桶 × model_name 序列；`models` 过滤参数（逗号分隔、≤10 个）防全量爆炸，
  *   未给时取区间内消耗 Top 10 模型。
  * - cross：Top 用户 × Top 10 模型消耗矩阵（稀疏 cells），其余模型按用户合并为 `others`
- *   （= 用户区间总消耗 − Top 模型消耗之和）。cross 为 §4 清单外增补端点，回流决议见任务卡。
+ *   （= 用户区间总消耗 − Top 模型消耗之和）。cross 为 §4 清单外的实现增补端点。
  *
  * 数值类型：`SUM(...)::bigint` / `COUNT(*)::bigint`，由 `db.ts` 的 int8 解析器转 number（notes §5.3）。
  */
@@ -16,6 +16,8 @@ import { sql } from "kysely";
 
 import { getDb, type ReadOnlyDatabase } from "@/server/db";
 import {
+  EXCLUDE_STAT_USERS_SQL,
+  LOG_TYPE_CONSUME,
   MODEL_NAME_PATTERN,
   QueryValidationError,
   type Granularity,
@@ -77,6 +79,7 @@ export function buildModelRankingTotalsQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       "model_name",
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
@@ -98,7 +101,9 @@ export function buildModelRankingRequestsQuery(
 ) {
   return db
     .selectFrom("logs")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select(["model_name", sql<number>`COUNT(*)::bigint`.as("request_count")])
+    .where("type", "=", LOG_TYPE_CONSUME)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
     .where("model_name", "in", modelNames)
@@ -219,14 +224,14 @@ export interface ModelTrendQuotaRow {
   model_name: string;
   total_quota: number;
   total_tokens: number;
-  prompt_tokens: number;
-  completion_tokens: number;
 }
 
 export interface ModelTrendLogRow {
   bucket_start: number;
   model_name: string;
   request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
 }
 
 /** 区间 Top N 模型（按消耗降序；trend 未指定 models 时的默认维度）。 */
@@ -237,6 +242,7 @@ export function buildTopModelsQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       "model_name",
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
@@ -258,13 +264,12 @@ export function buildModelTrendQuotaQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       trendBucketExpression(granularity).as("bucket_start"),
       "model_name",
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
       sql<number>`COALESCE(SUM(token_used), 0)::bigint`.as("total_tokens"),
-      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
-      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
     ])
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
@@ -273,7 +278,7 @@ export function buildModelTrendQuotaQuery(
     .groupBy("model_name");
 }
 
-/** 模型 × 桶的请求数（logs）。 */
+/** 模型 × 桶的请求数 + Token 拆分（logs 消费流水）。 */
 export function buildModelTrendRequestQuery(
   db: ReadOnlyDatabase,
   range: QueryRange,
@@ -282,11 +287,15 @@ export function buildModelTrendRequestQuery(
 ) {
   return db
     .selectFrom("logs")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       trendBucketExpression(granularity).as("bucket_start"),
       "model_name",
       sql<number>`COUNT(*)::bigint`.as("request_count"),
+      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
+      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
     ])
+    .where("type", "=", LOG_TYPE_CONSUME)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
     .where("model_name", "in", modelNames)
@@ -306,9 +315,9 @@ export function assembleModelTrend(
   for (const row of quotaRows) {
     quotaByKey.set(`${toInteger(row.bucket_start)}|${row.model_name}`, row);
   }
-  const requestsByKey = new Map<string, number>();
+  const logByKey = new Map<string, ModelTrendLogRow>();
   for (const row of logRows) {
-    requestsByKey.set(`${toInteger(row.bucket_start)}|${row.model_name}`, toInteger(row.request_count));
+    logByKey.set(`${toInteger(row.bucket_start)}|${row.model_name}`, row);
   }
 
   const series = models.map((modelName) => ({
@@ -316,14 +325,17 @@ export function assembleModelTrend(
     points: buckets.map((bucket) => {
       const key = `${bucket}|${modelName}`;
       const quota = quotaByKey.get(key);
+      const log = logByKey.get(key);
+      const promptTokens = toInteger(log?.prompt_tokens);
+      const completionTokens = toInteger(log?.completion_tokens);
       return {
         bucketStart: bucket,
         label: bucketLabel(bucket, granularity),
         totalQuota: toInteger(quota?.total_quota),
-        totalTokens: toInteger(quota?.total_tokens),
-        promptTokens: toInteger(quota?.prompt_tokens),
-        completionTokens: toInteger(quota?.completion_tokens),
-        requestCount: requestsByKey.get(key) ?? 0,
+        totalTokens: Math.max(toInteger(quota?.total_tokens), promptTokens + completionTokens),
+        promptTokens,
+        completionTokens,
+        requestCount: toInteger(log?.request_count),
       };
     }),
   }));
@@ -369,6 +381,8 @@ export async function runModelTrendQuery(
 export interface ModelCrossUser {
   userId: number;
   username: string;
+  /** users.display_name（昵称）；由排行查询透传，缺失时展示层回落账号。）*/
+  displayName?: string;
 }
 
 export interface ModelCrossCell {
@@ -402,6 +416,7 @@ export function buildModelCrossMatrixQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       "user_id",
       "model_name",
@@ -416,7 +431,7 @@ export function buildModelCrossMatrixQuery(
 
 /** 组装交叉结果：cells 稀疏；others 用用户总消耗减 Top 模型消耗（不为负）。 */
 export function assembleModelCross(
-  users: Array<{ userId: number; username: string; totalQuota: number }>,
+  users: Array<{ userId: number; username: string; displayName?: string; totalQuota: number }>,
   models: string[],
   rows: ModelCrossRow[],
 ): ModelCrossResult {
@@ -437,7 +452,12 @@ export function assembleModelCross(
   }));
 
   return {
-    users: users.map((user) => ({ userId: user.userId, username: user.username })),
+    users: users.map((user) => ({
+      userId: user.userId,
+      username: user.username,
+      // 未补齐昵称时不写入该键，保持旧响应形状（前端按可选字段处理）
+      ...(user.displayName === undefined ? {} : { displayName: user.displayName }),
+    })),
     models,
     cells,
     others,
@@ -462,6 +482,7 @@ export async function runModelCrossQuery(
   const users = ranking.map((row) => ({
     userId: row.userId,
     username: row.username,
+    ...(row.displayName === undefined ? {} : { displayName: row.displayName }),
     totalQuota: row.totalQuota,
   }));
 

@@ -1,19 +1,28 @@
 "use client";
 
-/** 每日消耗日历热力图（FE-M2-02）：近一年（固定窗口，卡内口径）。 */
+/** 每日消耗日历热力图：窗口长度由调用方传入的固定序列决定（当前为近半年）。 */
 import type { EChartsOption } from "echarts";
 import { useMemo } from "react";
 
 import { useTheme } from "@/app/providers";
 import { EChart } from "@/components/charts/EChart";
+import type { TrendMetric } from "@/components/charts/trend-line";
 import { readChartTheme, type ChartTheme } from "@/lib/chart-theme";
-import { formatQuota } from "@/lib/format";
+import { formatCompactNumber, formatQuota } from "@/lib/format";
 import type { TrendPoint } from "@/server/queries/trend";
 
+function formatValue(metric: TrendMetric, value: number): string {
+  return metric === "totalQuota" ? formatQuota(value) : formatCompactNumber(value);
+}
+
 /** 纯函数便于单测：日历热力 option（日期标签 + 消耗强度）。 */
-export function buildCalendarOption(points: TrendPoint[], theme: ChartTheme): EChartsOption {
-  const data = points.map((point) => [point.label, point.totalQuota]);
-  const max = Math.max(1, ...points.map((point) => point.totalQuota));
+export function buildCalendarOption(
+  points: TrendPoint[],
+  theme: ChartTheme,
+  metric: TrendMetric = "totalQuota",
+): EChartsOption {
+  const data = points.map((point) => [point.label, point[metric]]);
+  const max = Math.max(1, ...points.map((point) => point[metric]));
   const first = points[0]?.label;
   const last = points[points.length - 1]?.label;
 
@@ -22,7 +31,7 @@ export function buildCalendarOption(points: TrendPoint[], theme: ChartTheme): EC
       formatter: (params: { value?: unknown }) => {
         const value = params.value as [string, number] | undefined;
         if (!Array.isArray(value)) return "";
-        return `${value[0]}：${formatQuota(value[1])}`;
+        return `${value[0]}：${formatValue(metric, value[1])}`;
       },
     },
     visualMap: {
@@ -71,18 +80,23 @@ export interface CalendarHeatmapProps {
   points: TrendPoint[];
   height?: number | string;
   exportName?: string;
+  metric?: TrendMetric;
 }
 
 export function CalendarHeatmap({
   points,
   height = 190,
   exportName = "heatmap",
+  metric = "totalQuota",
 }: CalendarHeatmapProps) {
   const { resolvedTheme } = useTheme();
   // 主题切换后 class 已先写入 DOM，需重读 CSS 变量再重建 option
   // eslint-disable-next-line react-hooks/exhaustive-deps -- resolvedTheme 仅用于触发重读，readChartTheme 内部读取 DOM
   const theme = useMemo(() => readChartTheme(), [resolvedTheme]);
-  const option = useMemo(() => buildCalendarOption(points, theme), [points, theme]);
+  const option = useMemo(
+    () => buildCalendarOption(points, theme, metric),
+    [points, theme, metric],
+  );
 
   return (
     <EChart

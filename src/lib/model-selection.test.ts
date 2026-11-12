@@ -1,4 +1,4 @@
-/** FE-M2-04 单测：模型多选上限（第 11 个不生效）与默认 Top5。 */
+/** 单测：模型多选上限（第 11 个不生效）与默认 Top5。*/
 import { describe, expect, it } from "vitest";
 
 import {

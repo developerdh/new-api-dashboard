@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# New API Dashboard —— 多阶段构建（INF-M4-01）
+# New API Dashboard —— 多阶段构建
 #
 # 目标镜像：
 #   runner           默认，standalone 运行时（不含浏览器，体积小）
@@ -10,7 +10,7 @@
 #   docker build -t new-api-dashboard .
 #   docker build --target runner-snapshot -t new-api-dashboard:snapshot .
 #
-# 注意：本仓库环境未安装 Docker，镜像构建/运行未在本机验证（登记 LH-09）。
+# 注意：本仓库环境未安装 Docker，镜像构建/运行未在本机验证。
 
 FROM node:22-slim AS base
 ENV PNPM_HOME=/pnpm \
@@ -45,9 +45,9 @@ FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
-    PORT=3000 \
+    PORT=3088 \
     HOSTNAME=0.0.0.0 \
-    DASHBOARD_BASE_URL=http://127.0.0.1:3000 \
+    DASHBOARD_BASE_URL=http://127.0.0.1:3088 \
     SNAPSHOT_DIR=/app/data/snapshots \
     NEXT_TELEMETRY_DISABLED=1
 
@@ -64,10 +64,10 @@ RUN mkdir -p /app/data/snapshots \
  && chown -R nextjs:nodejs /app/data /app/public
 
 USER nextjs
-EXPOSE 3000
+EXPOSE 3088
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:3088/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "server.js"]
 
@@ -76,9 +76,9 @@ FROM snapshot-base AS runner-snapshot
 WORKDIR /app
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
-    PORT=3000 \
+    PORT=3088 \
     HOSTNAME=0.0.0.0 \
-    DASHBOARD_BASE_URL=http://127.0.0.1:3000 \
+    DASHBOARD_BASE_URL=http://127.0.0.1:3088 \
     SNAPSHOT_DIR=/app/data/snapshots \
     NEXT_TELEMETRY_DISABLED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -98,9 +98,9 @@ RUN mkdir -p /app/data/snapshots \
  && chown -R nextjs:nodejs /app
 
 USER nextjs
-EXPOSE 3000
+EXPOSE 3088
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:3088/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "server.js"]

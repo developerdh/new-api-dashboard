@@ -1,5 +1,5 @@
 /**
- * ECharts 主题投递（FE-M2-01）：把 CSS 变量映射为 option 的颜色，主题切换时重设 option。
+ * ECharts 主题投递：把 CSS 变量映射为 option 的颜色，主题切换时重设 option。
  *
  * 为什么不 dispose 重建（卡内口径）：ECharts 无 setTheme API，重建会丢失缩放/图例状态；
  * 统一在 wrapper 里对 option 做「主题补全」，主题变化时 `setOption(themed, { notMerge: true })`。
@@ -15,13 +15,14 @@ export interface ChartTheme {
   palette: string[];
 }
 
+/** SSR 兜底：与新版 new-api 默认 preset 的蓝/青/紫/粉/绿图表色板对齐。 */
 const FALLBACK_THEME: ChartTheme = {
   mode: "light",
-  foreground: "#0a0a0a",
-  mutedForeground: "#737373",
-  border: "#e5e5e5",
+  foreground: "#252525",
+  mutedForeground: "#7a7a7a",
+  border: "#ededed",
   card: "#ffffff",
-  palette: ["#e76f51", "#2a9d8f", "#264653", "#e9c46a", "#f4a261"],
+  palette: ["#4aa3ff", "#17a9c4", "#a98bee", "#e07bc4", "#3ab584"],
 };
 
 /** 从 `<html>` 的 CSS 变量读取当前主题色（客户端调用；SSR 时返回亮色兜底）。 */

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 主题系统（FE-M2-01 / 方案 §7.3）：CSS 变量 + localStorage，不引入 next-themes。
+ * 主题系统（方案 §7.3）：CSS 变量 + localStorage，不引入 next-themes。
  *
  * - 三态：light / dark / system；
  * - 实际生效值写到 `<html class="dark">` 与 `data-theme`（ECharts 等据此重绘）；

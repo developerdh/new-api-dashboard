@@ -1,5 +1,5 @@
 /**
- * BE-M1-05 单测：单用户 overview/trend/models 的 SQL 口径、活跃天数、占比、最近记录、路由与缓存。
+ * 单测：单用户 overview/trend/models 的 SQL 口径、活跃天数、占比、最近记录、路由与缓存。
  *
  * 约束：无真实库——SQL 用 `compile()` 断言（不执行），执行层 mock `user.ts` 的三个 run/load 函数。
  */
@@ -105,11 +105,12 @@ describe("单用户 SQL 编译口径", () => {
     expect(compiled.parameters).toEqual([USER_ID, T0, T1]);
   });
 
-  it("overview 请求数：logs COUNT(*) 限定用户 + 区间", () => {
+  it("overview 请求数：logs 消费流水（type=2）COUNT(*) + Token 拆分，限定用户 + 区间", () => {
     const compiled = buildUserRequestCountQuery(db, USER_ID, { start: T0, end: T1 }).compile();
     expect(compiled.sql).toContain('from "logs"');
     expect(compiled.sql).toContain('COUNT(*)::bigint as "request_count"');
-    expect(compiled.parameters).toEqual([USER_ID, T0, T1]);
+    expect(compiled.sql).toMatch(/"type" = \$1/);
+    expect(compiled.parameters).toEqual([2, USER_ID, T0, T1]);
   });
 
   it("models：按 model_name 聚合，消耗降序 + model_name 兜底", () => {
@@ -120,22 +121,23 @@ describe("单用户 SQL 编译口径", () => {
     expect(compiled.parameters).toEqual([USER_ID, T0, T1]);
   });
 
-  it("recent：logs 按 created_at DESC + 固定 limit（参数化）", () => {
+  it("recent：logs 消费流水按 created_at DESC + 固定 limit（参数化）", () => {
     const compiled = buildUserRecentQuery(db, USER_ID).compile();
     expect(compiled.sql).toContain('from "logs"');
+    expect(compiled.sql).toMatch(/"type" = \$1/);
     expect(compiled.sql).toMatch(/order by "created_at" desc/i);
-    expect(compiled.sql).toMatch(/limit \$2/);
-    expect(compiled.parameters).toEqual([USER_ID, USER_RECENT_LIMIT]);
+    expect(compiled.sql).toMatch(/limit \$3/);
+    expect(compiled.parameters).toEqual([2, USER_ID, USER_RECENT_LIMIT]);
   });
 
-  it("trend 复用：带 userId 过滤的桶 SQL（$3 = user_id）", () => {
+  it("trend 复用：带 userId 过滤的桶 SQL（logs 为 $4 = user_id，含 type=2）", () => {
     const quota = buildTrendQuotaQuery(db, { start: T0, end: T1 }, "day", USER_ID).compile();
     const logs = buildTrendRequestQuery(db, { start: T0, end: T1 }, "day", USER_ID).compile();
 
     expect(quota.sql).toMatch(/"user_id" = \$3/);
-    expect(logs.sql).toMatch(/"user_id" = \$3/);
+    expect(logs.sql).toMatch(/"user_id" = \$4/);
     expect(quota.parameters).toEqual([T0, T1, USER_ID]);
-    expect(logs.parameters).toEqual([T0, T1, USER_ID]);
+    expect(logs.parameters).toEqual([2, T0, T1, USER_ID]);
   });
 });
 
@@ -157,11 +159,9 @@ describe("映射与占比", () => {
         {
           total_quota: 1_234,
           total_tokens: 5_678,
-          prompt_tokens: 4_000,
-          completion_tokens: 1_678,
           active_days: 3,
         },
-        { request_count: 9 },
+        { request_count: 9, prompt_tokens: 4_000, completion_tokens: 1_678 },
       ),
     ).toEqual(OVERVIEW);
   });

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * 看板快照 CLI（BE-M3-03 / 方案 §10 scripts/snapshot.ts）。
+ * 看板快照 CLI（方案 §10 scripts/snapshot.ts）。
  *
  * 用法（Node 22 原生类型剥离，无需 tsx）：
  *   pnpm snapshot --path=/dashboard --start=1794240000 --end=1794326400 --granularity=day
- *   pnpm snapshot --path=/users/7 --name=user-7 --base-url=http://127.0.0.1:3000
+ *   pnpm snapshot --path=/users/7 --name=user-7 --base-url=http://127.0.0.1:3088
  *
- * 前置：目标实例已启动且配置 ADMIN_TOKEN；服务端需安装 playwright + chromium（LH-08）。
+ * 前置：目标实例已启动且配置 ADMIN_TOKEN；服务端需安装 playwright + chromium。
  * 本 CLI 只调用 POST /api/snapshot，不直接依赖服务端模块。
  */
 
@@ -41,7 +41,7 @@ function parseArgs(argv: string[]): CliArgs {
     end: values.get("end"),
     granularity: values.get("granularity"),
     name: values.get("name"),
-    baseUrl: values.get("base-url") ?? process.env.DASHBOARD_BASE_URL ?? "http://127.0.0.1:3000",
+    baseUrl: values.get("base-url") ?? process.env.DASHBOARD_BASE_URL ?? "http://127.0.0.1:3088",
     token: values.get("token") ?? process.env.ADMIN_TOKEN,
   };
 }

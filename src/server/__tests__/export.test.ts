@@ -1,5 +1,5 @@
 /**
- * BE-M3-01 单测：CSV 转义/BOM/流式、数据集参数校验、滑动窗口限流、路由响应与 429。
+ * 单测：CSV 转义/BOM/流式、数据集参数校验、滑动窗口限流、路由响应与 429。
  *
  * 无真实库：数据层（stats.service / model / user query）全部 mock。
  */
@@ -134,9 +134,22 @@ describe("行映射与文件名", () => {
   it("四类数据集行顺序与 API 字段一致", () => {
     expect(
       rowsForUsersRanking([
-        { userId: 7, username: "alice", totalQuota: 100, totalTokens: 300, requestCount: 9 },
+        {
+          userId: 7,
+          username: "alice",
+          displayName: "爱丽丝",
+          totalQuota: 100,
+          totalTokens: 300,
+          requestCount: 9,
+        },
       ]),
-    ).toEqual([[7, "alice", 100, 300, 9]]);
+    ).toEqual([[7, "爱丽丝", "alice", 100, 300, 9]]);
+
+    expect(
+      rowsForUsersRanking([
+        { userId: 8, username: "bob", totalQuota: 1, totalTokens: 2, requestCount: 3 },
+      ]),
+    ).toEqual([[8, "", "bob", 1, 2, 3]]);
 
     expect(
       rowsForTrend([
@@ -268,7 +281,14 @@ describe("GET /api/export/csv", () => {
     trendUser.mockResolvedValue({
       data: {
         rows: [
-          { userId: 7, username: "a,b", totalQuota: 100, totalTokens: 300, requestCount: 9 },
+          {
+            userId: 7,
+            username: "a,b",
+            displayName: "爱丽丝",
+            totalQuota: 100,
+            totalTokens: 300,
+            requestCount: 9,
+          },
         ],
       },
       cached: false,
@@ -285,10 +305,12 @@ describe("GET /api/export/csv", () => {
 
     const { text, bytes } = await readCsvResponse(response);
     expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
-    expect(text.startsWith(`${CSV_BOM}user_id,username,total_quota,total_tokens,request_count`)).toBe(
-      true,
-    );
-    expect(text).toContain('7,"a,b",100,300,9');
+    expect(
+      text.startsWith(
+        `${CSV_BOM}user_id,display_name,username,total_quota,total_tokens,request_count`,
+      ),
+    ).toBe(true);
+    expect(text).toContain('7,爱丽丝,"a,b",100,300,9');
   });
 
   it("trend：走既有趋势 service（默认粒度 day），输出桶列", async () => {

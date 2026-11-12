@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 用户 × 模型交叉分布（FE-M2-04）：横向堆叠柱。
+ * 用户 × 模型交叉分布：横向堆叠柱。
  *
  * 数据来自 `/api/models/cross`：稀疏 cells + others（others = 用户总消耗 − Top 模型消耗之和）。
  * 渲染时按「用户 × 模型」补 0；模型列顺序固定为响应 models，others 作为最后一段。
@@ -12,6 +12,7 @@ import { useMemo } from "react";
 
 import { EChart } from "@/components/charts/EChart";
 import { formatPercent, formatQuota } from "@/lib/format";
+import { primaryUserLabel } from "@/lib/user-label";
 import type { ModelCrossResult } from "@/server/queries/model";
 
 const OTHERS_NAME = "其他模型";
@@ -32,7 +33,7 @@ export function buildCrossStackOption(result: ModelCrossResult): EChartsOption {
     userTotals.set(other.userId, (userTotals.get(other.userId) ?? 0) + other.totalQuota);
   }
 
-  const categories = users.map((user) => user.username || `用户 ${user.userId}`);
+  const categories = users.map((user) => primaryUserLabel(user));
 
   const series = result.models.map((modelName) => ({
     name: modelName,

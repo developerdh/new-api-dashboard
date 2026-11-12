@@ -1,4 +1,4 @@
-/** FE-M2-01 单测：ECharts 主题补全（纯函数，不依赖浏览器）。 */
+/** 单测：ECharts 主题补全（纯函数，不依赖浏览器）。 */
 import { describe, expect, it } from "vitest";
 
 import { applyChartTheme, readChartTheme, type ChartTheme } from "@/lib/chart-theme";

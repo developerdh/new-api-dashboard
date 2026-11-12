@@ -1,5 +1,5 @@
 -- ============================================================================
--- scripts/seed-demo.sql —— 本地演示库建表 + 演示数据（BE-M0-03）
+-- scripts/seed-demo.sql —— 本地演示库建表 + 演示数据
 --
 -- 用途：M1 开发/联调/测试使用的本地 demo 库；表结构按 docs/db-schema-notes.md §2
 --       基线（方案 §2.2 常见字段）建立，真实库复验后再校准。
@@ -78,7 +78,7 @@ CREATE INDEX idx_quota_data_user_created  ON quota_data (user_id, created_at);
 CREATE INDEX idx_quota_data_model_created ON quota_data (model_name, created_at);
 CREATE INDEX idx_logs_created_at          ON logs (created_at);
 CREATE INDEX idx_logs_user_created        ON logs (user_id, created_at);
--- 补充建议项（非 §2.4 条文，见 notes §4-D11）
+-- 补充建议项（非 §2.4 条文，见 notes §3.4）
 CREATE INDEX idx_logs_model_created       ON logs (model_name, created_at);
 
 -- ---------------------------------------------------------------------------

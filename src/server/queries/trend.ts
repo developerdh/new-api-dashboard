@@ -1,5 +1,5 @@
 /**
- * 全局趋势查询（BE-M1-03 / 方案 §3.2、§5.2–§5.4）。
+ * 全局趋势查询（方案 §3.2、§5.2–§5.4）。
  *
  * SQL 口径：
  * - quota_data 按 `DATE_TRUNC('<granularity>', to_timestamp(created_at) AT TIME ZONE 'Asia/Shanghai')`
@@ -19,6 +19,8 @@ import { sql } from "kysely";
 
 import { getDb, type ReadOnlyDatabase } from "@/server/db";
 import {
+  EXCLUDE_STAT_USERS_SQL,
+  LOG_TYPE_CONSUME,
   addShanghaiDays,
   addShanghaiMonths,
   bucketStart,
@@ -68,14 +70,14 @@ export interface TrendQuotaRow {
   bucket_start: number;
   total_quota: number;
   total_tokens: number;
-  prompt_tokens: number;
-  completion_tokens: number;
   active_users: number;
 }
 
 export interface TrendLogRow {
   bucket_start: number;
   request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
 }
 
 /** 按粒度平移 k 个桶（day=k 天、week=k 周、month=k 个自然月）。 */
@@ -128,12 +130,11 @@ export function buildTrendQuotaQuery(
 ) {
   const base = db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       trendBucketExpression(granularity).as("bucket_start"),
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
       sql<number>`COALESCE(SUM(token_used), 0)::bigint`.as("total_tokens"),
-      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
-      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
       sql<number>`COUNT(DISTINCT user_id)::bigint`.as("active_users"),
     ])
     .where("created_at", ">=", range.start)
@@ -143,7 +144,7 @@ export function buildTrendQuotaQuery(
   return filtered.groupBy(trendBucketExpression(granularity));
 }
 
-/** logs 分桶请求数查询（与 quota_data 同粒度同桶边界）；`userId` 给定时只统计该用户。 */
+/** logs 分桶聚合查询（消费流水：请求数 + Token 拆分）；`userId` 给定时只统计该用户。 */
 export function buildTrendRequestQuery(
   db: ReadOnlyDatabase,
   range: QueryRange,
@@ -152,10 +153,14 @@ export function buildTrendRequestQuery(
 ) {
   const base = db
     .selectFrom("logs")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       trendBucketExpression(granularity).as("bucket_start"),
       sql<number>`COUNT(*)::bigint`.as("request_count"),
+      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
+      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
     ])
+    .where("type", "=", LOG_TYPE_CONSUME)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end);
 
@@ -168,7 +173,7 @@ function toInteger(value: unknown): number {
   return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
-/** 合并 quota_data 聚合与 logs 计数（按桶起点；logs 缺失记 0）。 */
+/** 合并 quota_data 聚合与 logs 消费聚合（按桶起点；logs 缺失记 0）。 */
 export function mergeTrendRows(
   quotaRows: TrendQuotaRow[],
   logRows: TrendLogRow[],
@@ -180,8 +185,8 @@ export function mergeTrendRows(
     merged.set(bucket, {
       totalQuota: toInteger(row.total_quota),
       totalTokens: toInteger(row.total_tokens),
-      promptTokens: toInteger(row.prompt_tokens),
-      completionTokens: toInteger(row.completion_tokens),
+      promptTokens: 0,
+      completionTokens: 0,
       requestCount: 0,
       activeUsers: toInteger(row.active_users),
     });
@@ -193,14 +198,21 @@ export function mergeTrendRows(
     if (existing === undefined) {
       merged.set(bucket, {
         totalQuota: 0,
-        totalTokens: 0,
-        promptTokens: 0,
-        completionTokens: 0,
+        totalTokens: toInteger(row.prompt_tokens) + toInteger(row.completion_tokens),
+        promptTokens: toInteger(row.prompt_tokens),
+        completionTokens: toInteger(row.completion_tokens),
         requestCount: toInteger(row.request_count),
         activeUsers: 0,
       });
     } else {
       existing.requestCount = toInteger(row.request_count);
+      existing.promptTokens = toInteger(row.prompt_tokens);
+      existing.completionTokens = toInteger(row.completion_tokens);
+      // 当前桶 quota_data 有 ≤5 分钟延迟：Token 总量取两者较大值，保证 ≥ prompt+completion
+      existing.totalTokens = Math.max(
+        existing.totalTokens,
+        existing.promptTokens + existing.completionTokens,
+      );
     }
   }
 

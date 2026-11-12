@@ -1,5 +1,5 @@
 /**
- * GET /api/users/[id]/overview —— 单用户总览（BE-M1-05 / 方案 §3.3、§5.5）。
+ * GET /api/users/[id]/overview —— 单用户总览（方案 §3.3、§5.5）。
  *
  * 响应：`{ ok, data: { totalQuota, totalTokens, promptTokens, completionTokens, requestCount, activeDays },
  *        meta: { range, granularity: null, cached, source } }`

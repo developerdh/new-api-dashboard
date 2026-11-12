@@ -1,5 +1,5 @@
 /**
- * GET /api/echarts/runtime —— 只读暴露本仓库 echarts 运行时（FE-M3-02 单图导出用）。
+ * GET /api/echarts/runtime —— 只读暴露本仓库 echarts 运行时（单图导出用）。
  *
  * 用途：前端导出「自包含 HTML」时把运行时内联进导出文件，避免外网 CDN（内网/离线可用）。
  * 来源：`node_modules/echarts/dist/echarts.min.js`（与页面同一版本，构建期不联网）。

@@ -1,6 +1,6 @@
 "use client";
 
-/** 消耗趋势面积图（FE-M2-02）：当前区间 + 可选对比期（虚线）。 */
+/** 消耗趋势面积图：当前区间 + 可选对比期（虚线）。 */
 import type { EChartsOption } from "echarts";
 import { useMemo } from "react";
 
@@ -73,7 +73,7 @@ export interface TrendLineProps {
   comparePoints?: Array<TrendPoint | null>;
   metric: TrendMetric;
   height?: number | string;
-  /** 导出文件名 scope（FE-M3-02）。 */
+  /** 导出文件名 scope。 */
   exportName?: string;
 }
 

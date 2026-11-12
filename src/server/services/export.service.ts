@@ -1,9 +1,9 @@
 /**
- * CSV 导出服务（BE-M3-01 / 方案 §4、§9.2）。
+ * CSV 导出服务（方案 §4、§9.2）。
  *
  * 原则：只调用既有 query / service 函数（与页面同一缓存 key 与 SQL 口径），禁止新写聚合 SQL。
  * 数据集：
- * - usersRanking  → 用户消耗排行（userId/username/quota/token/请求数）
+ * - usersRanking  → 用户消耗排行（userId/昵称/账号/quota/token/请求数）
  * - trend         → 全局趋势桶序列（桶起点/标签/消耗/Token/请求数）
  * - modelsRanking → 模型消耗排行（模型/消耗/Token/请求数/单次平均成本）
  * - userModels    → 单用户模型分布（模型/消耗/Token 拆分/占比，必须带 userId）
@@ -53,7 +53,14 @@ export interface ExportPayload {
 export const CSV_BOM = "\uFEFF";
 
 const EXPORT_HEADERS: Record<ExportDataset, readonly string[]> = {
-  usersRanking: ["user_id", "username", "total_quota", "total_tokens", "request_count"],
+  usersRanking: [
+    "user_id",
+    "display_name",
+    "username",
+    "total_quota",
+    "total_tokens",
+    "request_count",
+  ],
   trend: [
     "bucket_start",
     "bucket_label",
@@ -137,6 +144,7 @@ function csvPayload(
 export function rowsForUsersRanking(rows: UserRankingRow[]): unknown[][] {
   return rows.map((row) => [
     row.userId,
+    row.displayName ?? "",
     row.username,
     row.totalQuota,
     row.totalTokens,

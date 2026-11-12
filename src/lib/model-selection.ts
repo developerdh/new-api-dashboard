@@ -1,5 +1,5 @@
 /**
- * 模型多选限制（FE-M2-04）：趋势最多同时选择 10 个模型（与 `/api/models/trend` 的 models 上限一致）。
+ * 模型多选限制：趋势最多同时选择 10 个模型（与 `/api/models/trend` 的 models 上限一致）。
  * 纯函数便于单测：第 11 个选择不生效（返回原数组引用）。
  */
 export const TREND_MODEL_MAX = 10;

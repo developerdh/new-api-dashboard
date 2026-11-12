@@ -1,47 +1,50 @@
 /**
- * BE-M0-03 单测：schema.ts 基线口径与「未复验候选列隔离」。
+ * /单测：schema.ts 基线口径与真实库复验后的列集合。
  *
- * 目的不是复述类型，而是把两条会被后续任务无意破坏的约束钉住：
- * 1. `Database` 只含方案 §2.2 基线列（M1 可编码范围）；
- * 2. 真实库复验前，候选列（quota_data.count / logs.type / users.used_quota 等）
- *    不得出现在 `Database`；晋升必须同时改本测试与 docs/db-schema-notes.md。
+ * 2026-11-11 已对真实库复验：quota_data 无 prompt/completion（改由 logs 提供），
+ * 新增 count/id 等实测列；此处锁定复验结论，避免回退到方案 §2.2 的假设列。
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   SCHEMA_VERIFICATION,
   type Database,
-  type LogsCandidateColumns,
   type LogsTable,
-  type QuotaDataCandidateColumns,
   type QuotaDataTable,
-  type UsersCandidateColumns,
   type UsersTable,
 } from "@/server/schema";
 
-describe("Database：方案 §2.2 基线列", () => {
+describe("Database：真实库列集合（2026-11-11 复验）", () => {
   it("只声明 quota_data / logs / users 三张表", () => {
     expectTypeOf<keyof Database>().toEqualTypeOf<"quota_data" | "logs" | "users">();
   });
 
-  it("quota_data 列集合与方案 §2.2 一致", () => {
+  it("quota_data：包含实测列，且不含 prompt/completion（方案 §2.2 差异 D2）", () => {
     expectTypeOf<keyof QuotaDataTable>().toEqualTypeOf<
+      | "id"
       | "user_id"
       | "username"
       | "model_name"
       | "created_at"
+      | "use_group"
+      | "token_id"
+      | "channel_id"
+      | "node_name"
       | "token_used"
+      | "count"
       | "quota"
-      | "prompt_tokens"
-      | "completion_tokens"
     >();
+    expectTypeOf<QuotaDataTable>().not.toHaveProperty("prompt_tokens");
+    expectTypeOf<QuotaDataTable>().not.toHaveProperty("completion_tokens");
   });
 
-  it("logs 列集合与方案 §2.2 一致（无 token_used）", () => {
+  it("logs：消费类型与 Token 拆分在 logs（差异 D4/D2）", () => {
     expectTypeOf<keyof LogsTable>().toEqualTypeOf<
+      | "id"
       | "user_id"
       | "username"
       | "created_at"
+      | "type"
       | "model_name"
       | "quota"
       | "prompt_tokens"
@@ -49,43 +52,35 @@ describe("Database：方案 §2.2 基线列", () => {
     >();
   });
 
-  it("users 列集合与方案 §2.2 一致", () => {
-    expectTypeOf<keyof UsersTable>().toEqualTypeOf<"id" | "username" | "status" | "quota">();
+  it("users：含 display_name / used_quota / request_count（实测）", () => {
+    expectTypeOf<keyof UsersTable>().toEqualTypeOf<
+      | "id"
+      | "username"
+      | "display_name"
+      | "status"
+      | "quota"
+      | "used_quota"
+      | "request_count"
+    >();
   });
 });
 
 describe("类型口径：Unix 秒与数值列", () => {
   it("created_at 为 Unix 秒（number，int8 由 db.ts 反序列化）", () => {
-    expectTypeOf<QuotaDataTable["created_at"]>().toEqualTypeOf<number>();
-    expectTypeOf<LogsTable["created_at"]>().toEqualTypeOf<number>();
+    expectTypeOf<QuotaDataTable["created_at"]>().toEqualTypeOf<number | null>();
+    expectTypeOf<LogsTable["created_at"]>().toEqualTypeOf<number | null>();
   });
 
-  it("用量/额度列统一为 number（不做 bigint 字符串化）", () => {
-    expectTypeOf<QuotaDataTable["quota"]>().toEqualTypeOf<number>();
-    expectTypeOf<QuotaDataTable["token_used"]>().toEqualTypeOf<number>();
-    expectTypeOf<LogsTable["prompt_tokens"]>().toEqualTypeOf<number>();
-    expectTypeOf<UsersTable["quota"]>().toEqualTypeOf<number>();
+  it("用量/额度列统一为 number | null（实测可空）", () => {
+    expectTypeOf<QuotaDataTable["quota"]>().toEqualTypeOf<number | null>();
+    expectTypeOf<QuotaDataTable["token_used"]>().toEqualTypeOf<number | null>();
+    expectTypeOf<LogsTable["prompt_tokens"]>().toEqualTypeOf<number | null>();
+    expectTypeOf<UsersTable["quota"]>().toEqualTypeOf<number | null>();
   });
-});
 
-describe("未复验候选列：类型层隔离", () => {
-  it("复验状态为未通过（与 notes §1 一致）", () => {
-    expect(SCHEMA_VERIFICATION.verified).toBe(false);
-    expect(SCHEMA_VERIFICATION.verifiedAt).toBeNull();
+  it("复验状态为已通过（notes 已回填）", () => {
+    expect(SCHEMA_VERIFICATION.verified).toBe(true);
+    expect(SCHEMA_VERIFICATION.verifiedAt).toBe("2026-11-11");
     expect(SCHEMA_VERIFICATION.notesDoc).toBe("docs/db-schema-notes.md");
-  });
-
-  it("候选列不进入 Database（复验前禁用，晋升须同步改测试与 notes）", () => {
-    expectTypeOf<Database["quota_data"]>().not.toHaveProperty("id");
-    expectTypeOf<Database["quota_data"]>().not.toHaveProperty("count");
-    expectTypeOf<Database["logs"]>().not.toHaveProperty("id");
-    expectTypeOf<Database["logs"]>().not.toHaveProperty("type");
-    expectTypeOf<Database["users"]>().not.toHaveProperty("used_quota");
-  });
-
-  it("候选列清单保持显式（避免被静默删除）", () => {
-    expectTypeOf<keyof QuotaDataCandidateColumns>().toEqualTypeOf<"id" | "count">();
-    expectTypeOf<keyof LogsCandidateColumns>().toEqualTypeOf<"type" | "id">();
-    expectTypeOf<keyof UsersCandidateColumns>().toEqualTypeOf<"used_quota">();
   });
 });

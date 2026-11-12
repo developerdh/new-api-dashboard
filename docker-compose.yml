@@ -1,8 +1,8 @@
-# New API Dashboard —— docker compose（INF-M4-01）
+# New API Dashboard —— docker compose
 #
 # 使用（先准备 .env：cp .env.example .env 并填写 DATABASE_URL/ADMIN_TOKEN）：
 #   docker compose up -d --build
-#   curl http://localhost:3000/api/health
+#   curl http://localhost:3088/api/health
 #
 # 快照能力（Playwright + chromium，镜像体积大）：
 #   DASHBOARD_TARGET=runner-snapshot docker compose up -d --build
@@ -11,7 +11,7 @@
 #   docker compose --profile demo up -d --build
 #   然后在 .env 使用 DATABASE_URL=postgres://demo:demo@demo-db:5432/new_api_demo
 #
-# 注意：本机无 Docker，以上命令未在本仓库环境实机验证（LH-09）。
+# 注意：本机无 Docker，以上命令未在本仓库环境实机验证。
 
 services:
   dashboard:
@@ -23,11 +23,12 @@ services:
       - .env
     environment:
       TZ: Asia/Shanghai
-      DASHBOARD_BASE_URL: http://127.0.0.1:3000
+      DASHBOARD_BASE_URL: http://127.0.0.1:3088
     ports:
-      - "3000:3000"
+      # 宿主与容器同为 3088
+      - "3088:3088"
     volumes:
-      # 快照产物持久化（不入库；BE-M4-02 起由受保护路由读取）
+      # 快照产物持久化（不入库；起由受保护路由读取）
       - ./data/snapshots:/app/data/snapshots
     restart: unless-stopped
     healthcheck:
@@ -35,7 +36,7 @@ services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:3088/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3

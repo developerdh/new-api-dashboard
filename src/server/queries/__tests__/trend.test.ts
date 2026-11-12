@@ -1,8 +1,8 @@
 /**
- * BE-M1-03 单测：桶序列、三粒度 SQL 编译、空桶补 0、compare 对齐、动态 TTL、路由响应/错误。
+ * 单测：桶序列、三粒度 SQL 编译、空桶补 0、compare 对齐、动态 TTL、路由响应/错误。
  *
  * 约束：无真实数据库——SQL 层用 `compile()` 断言（不执行），执行层 mock `loadTrendSeries`。
- * 数值对数挂 LH-05（真实/demo 库就绪时补）。
+ * 数值对数待真实库校验。
  *
  * 时间基准（Asia/Shanghai）：2026-11-10 00:00 = 1794240000；2026-11-09（周一）= 1794153600；
  * 2026-11-01 = 1793462400；2026-12-01 = 1796054400；2025-11-10（周一）= 1762704000。
@@ -152,11 +152,16 @@ describe("三粒度 SQL 编译（§5.2–§5.4）", () => {
         expect(compiled.sql).toContain(`DATE_TRUNC('${granularity}'`);
         expect(compiled.sql).toContain("to_timestamp(created_at) AT TIME ZONE 'Asia/Shanghai'");
         expect(compiled.sql).toMatch(/group by/i);
-        expect(compiled.sql).toMatch(/"created_at"\s*>=\s*\$1/);
-        expect(compiled.sql).toMatch(/"created_at"\s*<\s*\$2/);
-        expect(compiled.parameters).toEqual([T0, T1]);
         expect(compiled.sql).not.toContain(String(T0));
       }
+      expect(quota.sql).toMatch(/"created_at"\s*>=\s*\$1/);
+      expect(quota.sql).toMatch(/"created_at"\s*<\s*\$2/);
+      expect(quota.parameters).toEqual([T0, T1]);
+
+      expect(logs.sql).toMatch(/"type" = \$1/);
+      expect(logs.sql).toMatch(/"created_at"\s*>=\s*\$2/);
+      expect(logs.sql).toMatch(/"created_at"\s*<\s*\$3/);
+      expect(logs.parameters).toEqual([2, T0, T1]);
 
       expect(quota.sql).toContain('from "quota_data"');
       expect(quota.sql).toContain("COALESCE(SUM(quota), 0)::bigint");
@@ -175,12 +180,10 @@ describe("行合并与空桶补 0", () => {
           bucket_start: T0,
           total_quota: 100,
           total_tokens: 200,
-          prompt_tokens: 120,
-          completion_tokens: 80,
           active_users: 3,
         },
       ],
-      [{ bucket_start: T0, request_count: 7 }],
+      [{ bucket_start: T0, request_count: 7, prompt_tokens: 120, completion_tokens: 80 }],
     );
     expect(merged.get(T0)).toEqual({
       totalQuota: 100,
@@ -192,9 +195,18 @@ describe("行合并与空桶补 0", () => {
     });
   });
 
-  it("只有 logs 的桶：quota 侧记 0（保留请求数）", () => {
-    const merged = mergeTrendRows([], [{ bucket_start: T0, request_count: 5 }]);
-    expect(merged.get(T0)).toEqual({ ...emptyRow, requestCount: 5 });
+  it("只有 logs 的桶：quota 侧记 0（保留请求数与 Token 拆分）", () => {
+    const merged = mergeTrendRows(
+      [],
+      [{ bucket_start: T0, request_count: 5, prompt_tokens: 3, completion_tokens: 2 }],
+    );
+    expect(merged.get(T0)).toEqual({
+      ...emptyRow,
+      totalTokens: 5,
+      promptTokens: 3,
+      completionTokens: 2,
+      requestCount: 5,
+    });
   });
 
   it("toTrendPoints：空桶补 0，顺序以桶序列为准", () => {

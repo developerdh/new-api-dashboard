@@ -1,5 +1,5 @@
 /**
- * GET /api/trend —— 全局趋势（BE-M1-03 / 方案 §3.2、§4、§5.2–§5.4）。
+ * GET /api/trend —— 全局趋势（方案 §3.2、§4、§5.2–§5.4）。
  *
  * 参数：`start`/`end`（必填，ISO 或 Unix 秒）、`granularity=day|week|month`（缺省 day）、
  *       `compare=none|prev|yoy`（缺省 none）。

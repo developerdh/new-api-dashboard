@@ -1,5 +1,5 @@
 /**
- * 时间范围工具（FE-M2-02 起的前端共享件，供选择器与页面复用）。
+ * 时间范围工具（起的前端共享件，供选择器与页面复用）。
  *
  * 口径与后端一致：Unix 秒、`[start, end)`、Asia/Shanghai 自然日/自然月。
  * 东八区自 1991 年后无夏令时，故用固定 +8h 偏移做自然日分桶。
@@ -22,6 +22,9 @@ export const PRESETS: ReadonlyArray<{ key: RangePreset; label: string }> = [
   { key: "30d", label: "近 30 天" },
   { key: "month", label: "本月" },
 ];
+
+/** 缺省区间：近 30 天。单日区间下折线只有 1 个点且隐藏 symbol，趋势与对比线都不可见。 */
+export const DEFAULT_RANGE_PRESET: RangePreset = "30d";
 
 export const GRANULARITIES: ReadonlyArray<{ key: Granularity; label: string }> = [
   { key: "day", label: "日" },
@@ -88,13 +91,13 @@ export function parseGranularity(value: string | null): Granularity {
   return value === "week" || value === "month" ? value : "day";
 }
 
-/** URL 参数 → 区间；缺省回退今日（不写回 URL，由选择器负责写入）。 */
+/** URL 参数 → 区间；缺省回退 `DEFAULT_RANGE_PRESET`（不写回 URL，由选择器负责写入）。 */
 export function resolveRangeFromParams(
   startParam: string | null,
   endParam: string | null,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): TimeRange {
-  const fallback = todayRange(nowSeconds);
+  const fallback = presetRange(DEFAULT_RANGE_PRESET, nowSeconds);
   return {
     start: parseEpochSeconds(startParam) ?? fallback.start,
     end: parseEpochSeconds(endParam) ?? fallback.end,

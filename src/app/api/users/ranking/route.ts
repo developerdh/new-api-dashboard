@@ -1,5 +1,5 @@
 /**
- * GET /api/users/ranking —— 用户消耗排行（BE-M1-04 / 方案 §3.3、§4、§5.7）。
+ * GET /api/users/ranking —— 用户消耗排行（方案 §3.3、§4、§5.7）。
  *
  * 参数：`start`/`end`（必填，ISO 或 Unix 秒）、`limit`（缺省 20、上限 100）。
  * 响应：`{ ok: true, data: { rows: UserRankingRow[] }, meta: { range, granularity, cached, source } }`

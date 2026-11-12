@@ -1,6 +1,6 @@
 "use client";
 
-/** ECharts 实际渲染层（FE-M2-01/02/03）：仅在客户端加载，负责 resize、主题联动、事件与实例回传。 */
+/** ECharts 实际渲染层（02/03）：仅在客户端加载，负责 resize、主题联动、事件与实例回传。）*/
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 

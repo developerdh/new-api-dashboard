@@ -1,8 +1,8 @@
 /**
- * BE-M1-04 单测：§5.7 排行聚合、名称去重、请求数合并、limit 收紧、缓存与路由。
+ * 单测：§5.7 排行聚合、名称去重、请求数合并、limit 收紧、缓存与路由。
  *
  * 约束：无真实库——SQL 用 `compile()` 断言（不执行），执行层 mock `runUserRankingQuery`。
- * 数值对数挂 LH-05。
+ * 数值对数待真实库校验。
  */
 import { Kysely, PostgresDialect } from "kysely";
 import { Pool } from "pg";
@@ -114,7 +114,8 @@ describe("§5.7 排行 SQL 编译口径", () => {
     expect(compiled.sql).toContain('COUNT(*)::bigint as "request_count"');
     expect(compiled.sql).not.toMatch(/join/i);
     expect(compiled.sql).toMatch(/group by "user_id"/);
-    expect(compiled.parameters).toEqual([T0, T1, 7, 8]);
+    expect(compiled.sql).toMatch(/"type" = \$1/);
+    expect(compiled.parameters).toEqual([2, T0, T1, 7, 8]);
   });
 });
 

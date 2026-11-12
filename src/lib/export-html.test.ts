@@ -1,4 +1,4 @@
-/** FE-M3-02 单测：自包含 HTML 模板（option 序列化转义、主题、文件名）。 */
+/** 单测：自包含 HTML 模板（option 序列化转义、主题、文件名）。 */
 import { describe, expect, it } from "vitest";
 
 import {

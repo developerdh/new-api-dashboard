@@ -1,5 +1,5 @@
 /**
- * GET /api/users/[id]/models —— 单用户模型分布 + 最近使用记录（BE-M1-05 / 方案 §3.3、§5.6）。
+ * GET /api/users/[id]/models —— 单用户模型分布 + 最近使用记录（方案 §3.3、§5.6）。
  *
  * 响应：`{ ok, data: { models: UserModelRow[], recent: UserRecentRow[] },
  *        meta: { range, granularity: null, cached, source } }`

@@ -1,16 +1,17 @@
 /**
- * 看板快照服务（BE-M3-03 / 方案 §8.2）。
+ * 看板快照服务（方案 §8.2）。
  *
  * 流程：白名单校验 path/query → 并发队列（同时渲染 1，最多 3 个在途）→ Playwright
  * `goto(url) → waitForLoadState('networkidle') → page.content()` → 写入 `public/snapshots/`。
  *
  * 依赖说明：`playwright` 为可选运行时依赖。未安装时抛出 `SnapshotUnavailableError`
- * （路由映射 503），保证应用在无浏览器环境可正常构建/启动（安装与 chromium 下载见 LH-08）。
+ * （路由映射 503），保证应用在无浏览器环境可正常构建/启动（需安装 playwright 与 chromium）。
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { QueryValidationError } from "@/server/queries/common";
+import { SESSION_COOKIE_NAME, createSessionToken, readSessionConfig } from "@/server/session";
 
 /** 在途快照上限（1 个渲染 + 2 个排队；第 4 个请求 429）。 */
 export const SNAPSHOT_QUEUE_LIMIT = 3;
@@ -47,7 +48,7 @@ export class SnapshotBusyError extends Error {
 /** Playwright 未安装/不可用（503）。 */
 export class SnapshotUnavailableError extends Error {
   readonly code = "snapshot_unavailable";
-  constructor(message = "快照能力不可用：未安装 playwright 或 chromium（见 LH-08）") {
+  constructor(message = "快照能力不可用：未安装 playwright 或 chromium（需安装 playwright 与 chromium）") {
     super(message);
     this.name = "SnapshotUnavailableError";
   }
@@ -95,7 +96,7 @@ export function normalizeSnapshotQuery(
 export function buildSnapshotUrl(
   path: string,
   query: Record<string, string>,
-  baseUrl: string = process.env.DASHBOARD_BASE_URL ?? "http://127.0.0.1:3000",
+  baseUrl: string = process.env.DASHBOARD_BASE_URL ?? "http://127.0.0.1:3088",
 ): string {
   const search = new URLSearchParams(query).toString();
   const base = baseUrl.replace(/\/+$/, "");
@@ -174,8 +175,12 @@ interface PlaywrightPage {
   content(): Promise<string>;
 }
 
-interface PlaywrightBrowser {
+interface PlaywrightContext {
   newPage(): Promise<PlaywrightPage>;
+}
+
+interface PlaywrightBrowser {
+  newContext(options?: { extraHTTPHeaders?: Record<string, string> }): Promise<PlaywrightContext>;
   close(): Promise<void>;
 }
 
@@ -199,12 +204,24 @@ async function loadPlaywright(): Promise<PlaywrightModule> {
   }
 }
 
-/** 默认渲染器：goto → networkidle → content；browser.close 在 finally 保证。 */
+/**
+ * 默认渲染器：签发短期会话 Cookie → goto → networkidle → content。
+ * 快照要抓取受登录保护的页面，浏览器上下文必须携带与 middleware 同源的会话。
+ * browser.close 在 finally 保证。
+ */
 export const playwrightRenderer: SnapshotRenderer = async (url) => {
   const playwright = await loadPlaywright();
   const browser = await playwright.chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const config = readSessionConfig();
+    const cookie =
+      config === null
+        ? undefined
+        : `${SESSION_COOKIE_NAME}=${await createSessionToken(config.user, config)}`;
+    const context = await browser.newContext(
+      cookie === undefined ? {} : { extraHTTPHeaders: { cookie } },
+    );
+    const page = await context.newPage();
     await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
     return await page.content();
   } finally {
@@ -248,7 +265,7 @@ export async function createSnapshot(
   const query = normalizeSnapshotQuery(request.query);
   const renderer = options.renderer ?? playwrightRenderer;
   const queue = options.queue ?? snapshotQueue;
-  const baseUrl = options.baseUrl ?? process.env.DASHBOARD_BASE_URL ?? "http://127.0.0.1:3000";
+  const baseUrl = options.baseUrl ?? process.env.DASHBOARD_BASE_URL ?? "http://127.0.0.1:3088";
   const now = options.now ?? new Date();
 
   const url = buildSnapshotUrl(path, query, baseUrl);

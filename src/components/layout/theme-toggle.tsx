@@ -1,6 +1,6 @@
 "use client";
 
-/** 主题切换（FE-M2-01）：亮色 → 暗色 → 跟随系统 循环。 */
+/** 主题切换：亮色 → 暗色 → 跟随系统 循环。 */
 import { Monitor, Moon, Sun } from "lucide-react";
 
 import { useTheme, type ThemeChoice } from "@/app/providers";
@@ -13,9 +13,9 @@ const NEXT_HINT: Record<ThemeChoice, string> = {
 };
 
 export function ThemeToggle() {
-  const { theme, resolvedTheme, cycleTheme } = useTheme();
+  const { theme, cycleTheme } = useTheme();
   const Icon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
-  const label = `主题：${NEXT_HINT[theme]}（系统偏好为${resolvedTheme === "dark" ? "暗色" : "亮色"}）`;
+  const label = `主题：${NEXT_HINT[theme]}`;
 
   return (
     <Button

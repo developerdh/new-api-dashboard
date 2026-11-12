@@ -1,5 +1,5 @@
 /**
- * BE-M4-02 单测：Basic Auth 中间件（401/豁免/fail-closed）、受保护快照读取（穿越防护）、
+ * 安全收口单测：会话中间件（重定向/401/豁免/fail-closed）、受保护快照读取（穿越防护）、
  * 以及安全收口的关键不变量（参数白名单、缓存 key 白名单）。
  */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -19,18 +19,30 @@ import { GET as getSnapshotFile } from "@/app/api/snapshots/[file]/route";
 import { middleware } from "@/middleware";
 import { EXPORT_RATE_LIMIT } from "@/lib/rate-limit";
 import { cacheKey } from "@/server/cache";
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_SECONDS,
+  createSessionToken,
+  readSessionConfig,
+  readSessionUsername,
+} from "@/server/session";
 import { QueryValidationError, normalizeQueryParams } from "@/server/queries/common";
 import { SNAPSHOT_QUEUE_LIMIT, isSnapshotFilename } from "@/server/services/snapshot.service";
 
 const USER = "dash-user";
 const PASS = "dash-pass";
-const AUTH = `Basic ${Buffer.from(`${USER}:${PASS}`, "utf8").toString("base64")}`;
 
-function request(pathname: string, authorization?: string): NextRequest {
+function request(pathname: string, cookie?: string): NextRequest {
   return {
     nextUrl: new URL(`http://localhost${pathname}`),
-    headers: new Headers(authorization === undefined ? {} : { authorization }),
+    headers: new Headers(cookie === undefined ? {} : { cookie }),
   } as unknown as NextRequest;
+}
+
+async function validCookie(): Promise<string> {
+  const config = readSessionConfig();
+  if (config === null) throw new Error("测试凭据未配置");
+  return `${SESSION_COOKIE_NAME}=${await createSessionToken(config.user, config)}`;
 }
 
 let tmpDirs: string[] = [];
@@ -39,12 +51,14 @@ const originalDir = process.env.SNAPSHOT_DIR;
 beforeEach(() => {
   process.env.DASHBOARD_AUTH_USER = USER;
   process.env.DASHBOARD_AUTH_PASS = PASS;
+  delete process.env.DASHBOARD_SESSION_SECRET;
   vi.spyOn(console, "debug").mockImplementation(() => {});
 });
 
 afterEach(async () => {
   delete process.env.DASHBOARD_AUTH_USER;
   delete process.env.DASHBOARD_AUTH_PASS;
+  delete process.env.DASHBOARD_SESSION_SECRET;
   if (originalDir === undefined) delete process.env.SNAPSHOT_DIR;
   else process.env.SNAPSHOT_DIR = originalDir;
   vi.restoreAllMocks();
@@ -59,23 +73,65 @@ async function makeSnapshotsDir(): Promise<string> {
   return dir;
 }
 
-describe("Basic Auth 中间件", () => {
-  it("无凭据/错误凭据 → 401 + WWW-Authenticate", async () => {
-    for (const header of [undefined, "Basic d3Jvbmc6d3Jvbmc=", "Bearer token"]) {
-      const response = await middleware(request("/dashboard", header));
-      expect(response.status, String(header)).toBe(401);
-      expect(response.headers.get("www-authenticate")).toContain("Basic");
-      expect(response.headers.get("cache-control")).toBe("no-store");
+describe("登录会话中间件", () => {
+  it("无 Cookie / 伪造签名 → 页面重定向 /login", async () => {
+    for (const cookie of [
+      undefined,
+      `${SESSION_COOKIE_NAME}=`,
+      `${SESSION_COOKIE_NAME}=forged.value`,
+    ]) {
+      const response = await middleware(request("/dashboard", cookie));
+      expect(response.status, String(cookie)).toBe(307);
+      expect(response.headers.get("location")).toContain("/login");
     }
   });
 
-  it("正确凭据 → 放行（x-middleware-next）", async () => {
-    const response = await middleware(request("/dashboard", AUTH));
+  it("未登录访问 API → 401 JSON（不返回登录页 HTML）", async () => {
+    const response = await middleware(request("/api/overview?start=1&end=2"));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "unauthorized" },
+    });
+  });
+
+  it("有效会话 → 放行（x-middleware-next）", async () => {
+    const response = await middleware(request("/dashboard", await validCookie()));
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("豁免路径：/api/health、_next 静态资源、Bearer 端点（admin/snapshot）", async () => {
+  it("过期会话 / 其它密钥签发的会话 → 拒绝", async () => {
+    const config = readSessionConfig();
+    expect(config).not.toBeNull();
+    const expired = await createSessionToken(
+      USER,
+      config!,
+      Date.now() - (SESSION_TTL_SECONDS + 60) * 1000,
+    );
+    const foreign = await createSessionToken(USER, {
+      user: USER,
+      pass: "other",
+      secret: `${USER}:other`,
+    });
+    for (const token of [expired, foreign]) {
+      const response = await middleware(request("/dashboard", `${SESSION_COOKIE_NAME}=${token}`));
+      expect(response.status).toBe(307);
+    }
+  });
+
+  it("next 只保留站内相对路径", async () => {
+    const response = await middleware(request("/models?start=1&end=2"));
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/models?start=1&end=2");
+  });
+
+  it("豁免路径：登录链路、health、静态资源、Bearer 端点", async () => {
     for (const pathname of [
+      "/login",
+      "/api/auth/login",
+      "/api/auth/logout",
       "/api/health",
       "/_next/static/chunk.js",
       "/api/admin/cache/stats",
@@ -89,10 +145,11 @@ describe("Basic Auth 中间件", () => {
   });
 
   it("未配置凭据 → 503 fail-closed（开发环境兜底；生产另有启动 fail-fast）", async () => {
+    const cookie = await validCookie();
     delete process.env.DASHBOARD_AUTH_USER;
     delete process.env.DASHBOARD_AUTH_PASS;
 
-    const response = await middleware(request("/dashboard", AUTH));
+    const response = await middleware(request("/dashboard", cookie));
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
@@ -177,5 +234,26 @@ describe("安全收口关键不变量（对应 §9 清单）", () => {
   it("限流口径固定：导出 60s/10 次、快照在途上限 3", () => {
     expect(EXPORT_RATE_LIMIT).toEqual({ limit: 10, windowMs: 60_000 });
     expect(SNAPSHOT_QUEUE_LIMIT).toBe(3);
+  });
+});
+
+describe("布局会话读取不在预渲染阶段求值当前时间", () => {
+  it("无 token 时直接返回 null，且不调用 Date.now（Cache Components 预渲染约束）", async () => {
+    const config = readSessionConfig();
+    if (config === null) throw new Error("测试凭据未配置");
+
+    const nowSpy = vi.spyOn(Date, "now");
+    await expect(readSessionUsername(undefined, config)).resolves.toBeNull();
+    await expect(readSessionUsername("", config)).resolves.toBeNull();
+    expect(nowSpy).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
+  });
+
+  it("有效 token 返回账号名", async () => {
+    const config = readSessionConfig();
+    if (config === null) throw new Error("测试凭据未配置");
+
+    const token = await createSessionToken(config.user, config);
+    await expect(readSessionUsername(token, config)).resolves.toBe(config.user);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * GET /api/export/csv —— CSV 导出（BE-M3-01 / 方案 §4、§9.2）。
+ * GET /api/export/csv —— CSV 导出（方案 §4、§9.2）。
  *
  * 数据集数据只调用既有 service/query（与页面同口径、同缓存 key）；本路由负责：
  * 参数校验 → 按 IP 限流（60s/10 次）→ 流式 CSV 响应。

@@ -1,7 +1,4 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-
-import { Navbar } from "@/components/layout/navbar";
 
 import "./globals.css";
 import { ThemeProvider } from "./providers";
@@ -15,8 +12,10 @@ export const metadata: Metadata = {
 };
 
 /**
- * 无闪烁主题注入（FE-M2-01）：在 hydration 前按 localStorage / 系统偏好设置 class 与 data-theme。
+ * 无闪烁主题注入：在 hydration 前按 localStorage / 系统偏好设置 class 与 data-theme。
  * 必须内联且同步执行；逻辑与 `src/app/providers.tsx` 的 applyTheme 保持一致。
+ * 登录页与控制台共用本根布局；控制台 Shell 只挂在 `(console)/layout.tsx`，
+ * 因此 /login 不会渲染侧边栏与顶栏。
  */
 const THEME_INIT_SCRIPT = `(function () {
   try {
@@ -38,15 +37,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="flex min-h-full flex-col font-sans">
-        <ThemeProvider>
-          <Suspense
-            fallback={<div aria-hidden="true" className="h-14 border-b bg-background" />}
-          >
-            <Navbar />
-          </Suspense>
-          <div className="flex-1">{children}</div>
-        </ThemeProvider>
+      <body className="min-h-full font-sans">
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

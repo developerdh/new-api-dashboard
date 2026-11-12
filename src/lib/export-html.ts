@@ -1,5 +1,5 @@
 /**
- * 单图导出为自包含 HTML（FE-M3-02 / 方案 §8.1）。
+ * 单图导出为自包含 HTML（方案 §8.1）。
  *
  * 口径：`getOption()` 序列化 + 内联 echarts 运行时（来自 `/api/echarts/runtime`，本地产物，不用 CDN）。
  * 交互（tooltip / 图例筛选 / dataZoom）由内联运行时保留；纯 SVG 快照方案不采用。

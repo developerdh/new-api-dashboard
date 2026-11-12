@@ -1,8 +1,8 @@
 /**
- * BE-M1-06 单测：模型排行/趋势/交叉的 SQL 口径、models 过滤、平均成本、others 合并、路由与缓存。
+ * 单测：模型排行/趋势/交叉的 SQL 口径、models 过滤、平均成本、others 合并、路由与缓存。
  *
  * 约束：无真实库——SQL 用 `compile()` 断言（不执行），执行层 mock 三个 run 函数。
- * 数值对数挂 LH-05；cross 端点回流决议待用户批准。
+ * 数值对数待真实库校验。
  */
 import { Kysely, PostgresDialect } from "kysely";
 import { Pool } from "pg";
@@ -111,8 +111,8 @@ describe("模型统计 SQL 编译口径", () => {
 
     expect(compiled.sql).toContain('from "logs"');
     expect(compiled.sql).toContain('COUNT(*)::bigint as "request_count"');
-    expect(compiled.sql).toMatch(/"model_name" in \(\$3, \$4\)/);
-    expect(compiled.parameters).toEqual([T0, T1, "gpt-4o", "claude"]);
+    expect(compiled.sql).toMatch(/"model_name" in \(\$4, \$5\)/);
+    expect(compiled.parameters).toEqual([2, T0, T1, "gpt-4o", "claude"]);
   });
 
   it("趋势：桶 × model_name 分组，IN 参数化，空桶由 JS 补齐", () => {
@@ -125,10 +125,13 @@ describe("模型统计 SQL 编译口径", () => {
 
     for (const compiled of [quota, logs]) {
       expect(compiled.sql).toContain("DATE_TRUNC('day'");
-      expect(compiled.sql).toMatch(/"model_name" in \(\$3\)/);
       expect(compiled.sql).toMatch(/group by .*"model_name"/);
-      expect(compiled.parameters).toEqual([T0, T1, "gpt-4o"]);
     }
+    expect(quota.sql).toMatch(/"model_name" in \(\$3\)/);
+    expect(quota.parameters).toEqual([T0, T1, "gpt-4o"]);
+    expect(logs.sql).toMatch(/"type" = \$1/);
+    expect(logs.sql).toMatch(/"model_name" in \(\$4\)/);
+    expect(logs.parameters).toEqual([2, T0, T1, "gpt-4o"]);
   });
 
   it("Top 模型默认维度：limit 固定参数化", () => {
@@ -235,11 +238,17 @@ describe("装配：平均成本 / 序列 / 交叉 others", () => {
           model_name: "gpt-4o",
           total_quota: 100,
           total_tokens: 200,
+        },
+      ],
+      [
+        {
+          bucket_start: T1,
+          model_name: "gpt-4o",
+          request_count: 3,
           prompt_tokens: 120,
           completion_tokens: 80,
         },
       ],
-      [{ bucket_start: T1, model_name: "gpt-4o", request_count: 3 }],
     );
 
     expect(result.series).toHaveLength(1);

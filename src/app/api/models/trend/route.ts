@@ -1,5 +1,5 @@
 /**
- * GET /api/models/trend —— 模型趋势（BE-M1-06 / 方案 §3.4）。
+ * GET /api/models/trend —— 模型趋势（方案 §3.4）。
  *
  * 参数：`start`/`end`（必填）、`granularity=day|week|month`（缺省 day）、
  *       `models`（逗号分隔、≤10 个；缺省取区间消耗 Top 10）。

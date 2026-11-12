@@ -1,9 +1,9 @@
 /**
- * GET /api/users/[id]/trend —— 单用户趋势（BE-M1-05 / 方案 §3.3、§5.5）。
+ * GET /api/users/[id]/trend —— 单用户趋势（方案 §3.3、§5.5）。
  *
  * 参数：`start`/`end`（必填）、`granularity=day|week|month`（缺省 day）。
  * 响应：`{ ok, data: { points: TrendPoint[] }, meta: { range, granularity, cached, source } }`
- * 说明：复用 BE-M1-03 的桶序列/合并逻辑，仅加 userId 过滤；桶数上限同全局趋势（1000 → 400）。
+ * 说明：复用 的桶序列/合并逻辑，仅加 userId 过滤；桶数上限同全局趋势（1000 → 400）。
  */
 import { connection } from "next/server";
 

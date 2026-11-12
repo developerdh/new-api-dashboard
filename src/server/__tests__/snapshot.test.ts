@@ -1,8 +1,8 @@
 /**
- * BE-M3-03 单测：快照路径白名单/query 校验/文件名/并发队列/写文件；路由守卫与错误映射。
+ * 单测：快照路径白名单/query 校验/文件名/并发队列/写文件；路由守卫与错误映射。
  *
  * 约束：本机未安装 playwright（会话约束禁止新增依赖）——默认渲染器路径在本环境返回 503，
- * 因此用注入 renderer 覆盖渲染逻辑；真实快照验收登记 LH-08。
+ * 因此用注入 renderer 覆盖渲染逻辑；真实快照验收待补。
  */
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

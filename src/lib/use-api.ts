@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 统一数据获取 hook（FE-M2-01）：fetch + loading/error + 可选轮询，不引入 SWR/react-query。
+ * 统一数据获取 hook：fetch + loading/error + 可选轮询，不引入 SWR/react-query。
  *
  * 约定：后端统一响应 `{ ok, data, meta }` / `{ ok:false, error:{ code, message, issues? } }`。
  * `url` 为 null 或 `enabled=false` 时不发请求（便于等待时间选择器参数就绪）。
@@ -70,6 +70,15 @@ export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseA
           headers: { accept: "application/json" },
           cache: "no-store",
         });
+        // 会话过期：回到登录页并保留当前位置，避免停留在一屏失败卡片上
+        if (response.status === 401) {
+          const target = `${window.location.pathname}${window.location.search}`;
+          // 会话过期需整页导航，让 middleware 重新判断并渲染登录页
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          window.location.assign(`/login?next=${encodeURIComponent(target)}`);
+          return;
+        }
+
         const body = (await response.json()) as ApiEnvelope<T>;
         if (cancelled) return;
 

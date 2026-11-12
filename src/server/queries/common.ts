@@ -1,7 +1,7 @@
 /**
- * 查询公共基座（BE-M1-01）：统一参数校验、Unix 秒 + Asia/Shanghai 时间语义、缓存接入。
+ * 查询公共基座：统一参数校验、Unix 秒 + Asia/Shanghai 时间语义、缓存接入。
  *
- * M1 其余统计卡（BE-M1-02~06）统一走这里，不允许各自解析参数：
+ * M1 其余统计卡统一走这里，不允许各自解析参数：
  * ```ts
  * const params = normalizeQueryParams(request.nextUrl.searchParams);
  * const { data, cached } = await cachedQuery(queryCacheKey("overview", params), SCOPE_TTL_MS.overview, load);
@@ -14,6 +14,7 @@
  * - 日/周/月边界一律按 Asia/Shanghai 计算；周起点与 PG `DATE_TRUNC('week', …)` 一致 = **周一**；
  * - JS 只用于区间换算，趋势桶起点以 SQL（方案 §5 的 `DATE_TRUNC(... AT TIME ZONE 'Asia/Shanghai')`）为准。
  */
+import { sql } from "kysely";
 import { z } from "zod";
 
 import { CACHE_TTL_MS, cacheKey, getCache, getOrCache, type CacheScope } from "@/server/cache";
@@ -30,6 +31,31 @@ export const MAX_LIMIT = 500;
 
 /** 允许 2100-01-01 之前的 Unix 秒（与 `cache.ts` 的 key 校验口径一致）。 */
 export const MAX_EPOCH_SECONDS = 4_102_444_800;
+
+/**
+ * `logs.type` 的消费流水类型（2026-11-11 真实库实测：type=2 的行贡献全部 quota，
+ * 其余类型 quota 为 0）。请求数与 Token 拆分只统计消费流水，避免错误/充值/管理日志干扰。
+ */
+export const LOG_TYPE_CONSUME = 2;
+
+/**
+ * 统计口径排除的账号：管理员/运维账号的调用会污染使用量与活跃度指标。
+ * 真实库实测 `admin` 为 `users.id = 1`，`logs` / `quota_data` 中 username 均为 `admin`。
+ */
+export const EXCLUDED_STAT_USERNAMES = ["admin"] as const;
+
+/**
+ * 排除上述账号的 WHERE 片段（全部为代码常量，不含外部输入，故不新增参数占位）。
+ *
+ * 双保险：
+ * - `user_id NOT IN (SELECT id FROM users WHERE username = 'admin')`：覆盖账号改名后旧日志里的旧用户名；
+ * - `lower(username) <> 'admin'`：覆盖 users 表缺行、只有日志快照的历史数据。
+ * `user_id IS NULL` 的行不属于任何账号（多数查询已单独过滤），这里保留以免误伤。
+ *
+ * 用法：`db.selectFrom("logs").where(EXCLUDE_STAT_USERS_SQL)...`
+ */
+export const EXCLUDE_STAT_USERS_SQL =
+  sql<boolean>`(coalesce(lower("username"), '') <> 'admin') and ("user_id" is null or "user_id" not in (select "id" from "users" where lower("username") = 'admin'))`;
 
 /** modelName 白名单：与 `cache.ts` 的 key 校验同规则（改一处必须同步另一处 + 单测）。 */
 export const MODEL_NAME_PATTERN = /^[A-Za-z0-9._@/-]{1,128}$/;
@@ -289,7 +315,7 @@ export function yoyRange(start: number, end: number): QueryRange {
 }
 
 /* ------------------------------------------------------------------ */
-/* 缓存接入约定（与 BE-M0-04 对齐）                                     */
+/* 缓存接入约定（与缓存基座对齐） */
 /* ------------------------------------------------------------------ */
 
 /** scope → TTL 常量表（与 `cache.ts` 的 `CACHE_TTL_MS` 同源，禁止另建一份）。 */

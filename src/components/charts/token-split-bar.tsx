@@ -1,5 +1,5 @@
 /**
- * Token 输入/输出占比（FE-M2-03）：双段条形（无图表库依赖，便于无障碍与快照）。
+ * Token 输入/输出占比：双段条形（无图表库依赖，便于无障碍与快照）。
  * 数据来自单用户 overview 的 prompt/completion 聚合。
  */
 import { formatCompactNumber, formatPercent } from "@/lib/format";

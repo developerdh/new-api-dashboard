@@ -1,4 +1,4 @@
-/** FE-M2-02 单测：前端时间范围工具（预设/自然日/自然月/参数解析）。 */
+/** 单测：前端时间范围工具（预设/自然日/自然月/参数解析）。 */
 import { describe, expect, it } from "vitest";
 
 import {
@@ -62,19 +62,17 @@ describe("预设区间", () => {
 });
 
 describe("URL 参数解析", () => {
-  it("start/end 合法则使用，否则回退今日", () => {
+  it("start/end 合法则使用，否则回退近 30 天（趋势图需要多点）", () => {
     expect(resolveRangeFromParams(String(NOV1), String(TODAY_START), NOW)).toEqual({
       start: NOV1,
       end: TODAY_START,
     });
-    expect(resolveRangeFromParams(null, null, NOW)).toEqual({
-      start: TODAY_START,
+    const fallback = {
+      start: TODAY_START - 29 * DAY_SECONDS,
       end: TODAY_START + DAY_SECONDS,
-    });
-    expect(resolveRangeFromParams("abc", "-1", NOW)).toEqual({
-      start: TODAY_START,
-      end: TODAY_START + DAY_SECONDS,
-    });
+    };
+    expect(resolveRangeFromParams(null, null, NOW)).toEqual(fallback);
+    expect(resolveRangeFromParams("abc", "-1", NOW)).toEqual(fallback);
   });
 
   it("Unix 秒解析与粒度回退", () => {

@@ -1,5 +1,5 @@
 /**
- * 数字 / 额度 / 日期格式化（FE-M2-01）。
+ * 数字 / 额度 / 日期格式化。
  *
  * 口径：后端 `quota` 原值透传（New API 额度单位），展示层换算为金额；
  * New API 默认 500000 quota = $1（可在后续卡片改成可配置项）。
@@ -56,6 +56,12 @@ export function formatQuota(quota: number, quotaPerUsd: number = QUOTA_PER_USD):
   const usd = quota / quotaPerUsd;
   const digits = Math.abs(usd) > 0 && Math.abs(usd) < 0.01 ? 4 : 2;
   return `$${usd.toFixed(digits)}`;
+}
+
+/** 大数 → 百万（M）单位，保留 1 位小数（12917870424 → 12917.9M）。 */
+export function formatMillions(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
 /** 比例 → 百分比字符串（0.1234 → 12.3%）。 */

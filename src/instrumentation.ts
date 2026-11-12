@@ -1,5 +1,5 @@
 /**
- * Next.js instrumentation 入口（BE-M0-04 / BE-M4-02）：启动时初始化缓存监控、退出兜底与访问控制 fail-fast。
+ * Next.js instrumentation 入口：启动时初始化缓存监控、退出兜底与访问控制 fail-fast。
  *
  * - 仅在 nodejs runtime 执行（edge 不加载 lru-cache）；
  * - `startCacheMetrics()`：每 5 分钟输出缓存占用（方案 §6.3(4)）；
@@ -24,7 +24,7 @@ function assertAuthConfigured(): void {
   const pass = process.env.DASHBOARD_AUTH_PASS ?? "";
   if (user === "" || pass === "") {
     throw new Error(
-      "生产环境必须配置 DASHBOARD_AUTH_USER / DASHBOARD_AUTH_PASS（BE-M4-02 访问控制 fail-fast）",
+      "生产环境必须配置 DASHBOARD_AUTH_USER / DASHBOARD_AUTH_PASS（访问控制 fail-fast）",
     );
   }
 }

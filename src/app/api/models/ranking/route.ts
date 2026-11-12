@@ -1,5 +1,5 @@
 /**
- * GET /api/models/ranking —— 模型消耗排行（BE-M1-06 / 方案 §3.4、§4）。
+ * GET /api/models/ranking —— 模型消耗排行（方案 §3.4、§4）。
  *
  * 参数：`start`/`end`（必填）、`limit`（缺省 20、上限 100）。
  * 响应：`{ ok, data: { rows: ModelRankingRow[] }, meta: { range, granularity: null, cached, source } }`

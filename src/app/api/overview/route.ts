@@ -1,5 +1,5 @@
 /**
- * GET /api/overview —— 全局总览（BE-M1-02 / 方案 §3.1、§4、§5.1）。
+ * GET /api/overview —— 全局总览（方案 §3.1、§4、§5.1）。
  *
  * 响应：`{ ok: true, data: OverviewSnapshot, meta: { range, granularity, cached, source } }`
  * 错误：参数非法 400 `invalid_query`；查询失败 500 `query_failed`（不回显 SQL/连接串）。

@@ -1,4 +1,4 @@
-/** FE-M2-01 单测：格式化工具（数字/额度/日期/区间/增量）。 */
+/** 单测：格式化工具（数字/额度/日期/区间/增量）。 */
 import { describe, expect, it } from "vitest";
 
 import {

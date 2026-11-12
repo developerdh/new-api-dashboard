@@ -1,5 +1,5 @@
 /**
- * 用户查询（BE-M1-04 排行 / BE-M1-05 单用户统计；方案 §3.3、§5.5–§5.7）。
+ * 用户查询（排行 / 单用户统计；方案 §3.3、§5.5–§5.7）。
  *
  * - 排行：按 user_id 聚合 Top N；username 取区间内消耗最大的名称；请求数二次查询。
  * - 单用户 overview：区间聚合 + 活跃天数（东八区自然日去重）；请求数走 logs。
@@ -12,6 +12,8 @@ import { sql } from "kysely";
 
 import { getDb, type ReadOnlyDatabase } from "@/server/db";
 import {
+  EXCLUDE_STAT_USERS_SQL,
+  LOG_TYPE_CONSUME,
   QueryValidationError,
   type Granularity,
   type QueryRange,
@@ -24,15 +26,17 @@ import {
   type TrendLogRow,
   type TrendQuotaRow,
 } from "@/server/queries/trend";
+import { loadUserIdentities, loadUserIdentity } from "@/server/queries/user-directory";
 
 /** limit 缺省 20、上限 100（§4 收紧口径，卡内定稿）。 */
 export const RANKING_DEFAULT_LIMIT = 20;
 export const RANKING_MAX_LIMIT = 100;
 
-/** 响应行。 */
+/** 响应行。`displayName` 为 users.display_name（昵称），查询未补齐时缺省、展示层回落账号。）*/
 export interface UserRankingRow {
   userId: number;
   username: string;
+  displayName?: string;
   totalQuota: number;
   totalTokens: number;
   requestCount: number;
@@ -64,6 +68,7 @@ function toInteger(value: unknown): number {
 export function buildRankingTotalsQuery(db: ReadOnlyDatabase, range: QueryRange, limit: number) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       "user_id",
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
@@ -71,6 +76,7 @@ export function buildRankingTotalsQuery(db: ReadOnlyDatabase, range: QueryRange,
     ])
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
+    .where("user_id", "is not", null)
     .groupBy("user_id")
     .orderBy(sql`COALESCE(SUM(quota), 0)`, "desc")
     .orderBy("user_id", "asc")
@@ -85,6 +91,7 @@ export function buildRankingNamesQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       "user_id",
       "username",
@@ -106,7 +113,9 @@ export function buildRankingRequestsQuery(
 ) {
   return db
     .selectFrom("logs")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select(["user_id", sql<number>`COUNT(*)::bigint`.as("request_count")])
+    .where("type", "=", LOG_TYPE_CONSUME)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
     .where("user_id", "in", userIds)
@@ -128,7 +137,7 @@ export function assembleUserRanking(
   const nameByUser = new Map<number, string>();
   for (const row of names) {
     const userId = toInteger(row.user_id);
-    if (!nameByUser.has(userId)) nameByUser.set(userId, row.username);
+    if (!nameByUser.has(userId)) nameByUser.set(userId, row.username ?? "");
   }
 
   const requestsByUser = new Map<number, number>();
@@ -148,7 +157,10 @@ export function assembleUserRanking(
   });
 }
 
-/** 执行排行查询：先取 Top N 用户，再并发取名称与请求数；Top N 为空时不再发后续查询。 */
+/**
+ * 执行排行查询：先取 Top N 用户，再并发取名称、请求数与 users 昵称；Top N 为空时不再发后续查询。
+ * 昵称来自 users.display_name（权威当前值），与 quota_data 里可能过期的 username 分开返回。
+ */
 export async function runUserRankingQuery(
   range: QueryRange,
   limit: number,
@@ -158,16 +170,20 @@ export async function runUserRankingQuery(
   if (totals.length === 0) return [];
 
   const userIds = totals.map((row) => toInteger(row.user_id));
-  const [names, requests] = await Promise.all([
+  const [names, requests, identities] = await Promise.all([
     buildRankingNamesQuery(db, range, userIds).execute() as Promise<RankingNameRow[]>,
     buildRankingRequestsQuery(db, range, userIds).execute() as Promise<RankingRequestRow[]>,
+    loadUserIdentities(userIds, db),
   ]);
 
-  return assembleUserRanking(totals, names, requests, limit);
+  return assembleUserRanking(totals, names, requests, limit).map((row) => ({
+    ...row,
+    displayName: identities.get(row.userId)?.displayName ?? "",
+  }));
 }
 
 /* ------------------------------------------------------------------ */
-/* 单用户统计（BE-M1-05）                                              */
+/* 单用户统计                                              */
 /* ------------------------------------------------------------------ */
 
 /** 数据来源标注（quota_data 聚合 + logs 请求数/最近记录）。 */
@@ -200,18 +216,25 @@ export interface UserOverviewSnapshot {
   requestCount: number;
   /** 区间内活跃天数（东八区自然日去重）。 */
   activeDays: number;
+  /**
+   * 用户身份（users 表当前值），由 `runUserOverviewQuery` 补齐，供详情页标题展示昵称。
+   * 用户不存在时为空串而非省略 —— 保持响应形状一致，不泄露用户存在性。
+   * 可选声明仅为兼容不含身份的纯统计快照（如 `toUserOverviewSnapshot` 单测夹具）。
+   */
+  username?: string;
+  displayName?: string;
 }
 
 export interface UserOverviewRow {
   total_quota: number;
   total_tokens: number;
-  prompt_tokens: number;
-  completion_tokens: number;
   active_days: number;
 }
 
 export interface UserRequestCountRow {
   request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
 }
 
 /**
@@ -226,11 +249,10 @@ export function buildUserOverviewQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
       sql<number>`COALESCE(SUM(token_used), 0)::bigint`.as("total_tokens"),
-      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
-      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
       sql<number>`COUNT(DISTINCT (created_at + 28800) / 86400)::bigint`.as("active_days"),
     ])
     .where("user_id", "=", userId)
@@ -238,7 +260,7 @@ export function buildUserOverviewQuery(
     .where("created_at", "<", range.end);
 }
 
-/** 单用户请求数（logs）。 */
+/** 单用户请求数 + Token 拆分（logs 消费流水）。 */
 export function buildUserRequestCountQuery(
   db: ReadOnlyDatabase,
   userId: number,
@@ -246,7 +268,13 @@ export function buildUserRequestCountQuery(
 ) {
   return db
     .selectFrom("logs")
-    .select(sql<number>`COUNT(*)::bigint`.as("request_count"))
+    .where(EXCLUDE_STAT_USERS_SQL)
+    .select([
+      sql<number>`COUNT(*)::bigint`.as("request_count"),
+      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
+      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
+    ])
+    .where("type", "=", LOG_TYPE_CONSUME)
     .where("user_id", "=", userId)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end);
@@ -259,28 +287,36 @@ export function toUserOverviewSnapshot(
 ): UserOverviewSnapshot {
   return {
     totalQuota: toInteger(row?.total_quota),
-    totalTokens: toInteger(row?.total_tokens),
-    promptTokens: toInteger(row?.prompt_tokens),
-    completionTokens: toInteger(row?.completion_tokens),
+    totalTokens: Math.max(
+      toInteger(row?.total_tokens),
+      toInteger(logRow?.prompt_tokens) + toInteger(logRow?.completion_tokens),
+    ),
+    promptTokens: toInteger(logRow?.prompt_tokens),
+    completionTokens: toInteger(logRow?.completion_tokens),
     requestCount: toInteger(logRow?.request_count),
     activeDays: toInteger(row?.active_days),
   };
 }
 
-/** 执行单用户总览查询（quota_data 聚合 + logs 计数并发）。 */
+/** 执行单用户总览查询（quota_data 聚合 + logs 计数 + users 身份，并发）。 */
 export async function runUserOverviewQuery(
   userId: number,
   range: QueryRange,
   db: ReadOnlyDatabase = getDb(),
 ): Promise<UserOverviewSnapshot> {
-  const [quotaRow, logRow] = await Promise.all([
+  const [quotaRow, logRow, identity] = await Promise.all([
     buildUserOverviewQuery(db, userId, range).executeTakeFirst(),
     buildUserRequestCountQuery(db, userId, range).executeTakeFirst(),
+    loadUserIdentity(userId, db),
   ]);
-  return toUserOverviewSnapshot(
-    quotaRow as UserOverviewRow | undefined,
-    logRow as UserRequestCountRow | undefined,
-  );
+  return {
+    ...toUserOverviewSnapshot(
+      quotaRow as UserOverviewRow | undefined,
+      logRow as UserRequestCountRow | undefined,
+    ),
+    username: identity?.username ?? "",
+    displayName: identity?.displayName ?? "",
+  };
 }
 
 /** 单用户趋势：复用 trend 分桶 SQL 与合并逻辑（带 userId 过滤）。 */
@@ -317,6 +353,20 @@ export interface UserModelAggregateRow {
   completion_tokens: number;
 }
 
+/** quota_data 侧模型聚合（额度 / token_used）。 */
+export interface UserModelQuotaRow {
+  model_name: string;
+  total_quota: number;
+  total_tokens: number;
+}
+
+/** logs 消费侧模型 Token 拆分。 */
+export interface UserModelTokenRow {
+  model_name: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
 /** §5.6 单用户模型分布：按 model_name 聚合、消耗降序（model_name 兜底保证稳定）。 */
 export function buildUserModelsQuery(
   db: ReadOnlyDatabase,
@@ -325,19 +375,64 @@ export function buildUserModelsQuery(
 ) {
   return db
     .selectFrom("quota_data")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select([
       "model_name",
       sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
       sql<number>`COALESCE(SUM(token_used), 0)::bigint`.as("total_tokens"),
-      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
-      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
     ])
     .where("user_id", "=", userId)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
+    .where("model_name", "is not", null)
     .groupBy("model_name")
     .orderBy(sql`COALESCE(SUM(quota), 0)`, "desc")
     .orderBy("model_name", "asc");
+}
+
+/** logs 消费侧按 model 聚合 Token 拆分（§5.6 的 prompt/completion，quota_data 无此列）。 */
+export function buildUserModelTokensQuery(
+  db: ReadOnlyDatabase,
+  userId: number,
+  range: QueryRange,
+) {
+  return db
+    .selectFrom("logs")
+    .where(EXCLUDE_STAT_USERS_SQL)
+    .select([
+      "model_name",
+      sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
+      sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
+    ])
+    .where("type", "=", LOG_TYPE_CONSUME)
+    .where("user_id", "=", userId)
+    .where("created_at", ">=", range.start)
+    .where("created_at", "<", range.end)
+    .where("model_name", "is not", null)
+    .groupBy("model_name");
+}
+
+/** 合并 quota 聚合与 logs Token 拆分（按 model_name；缺失补 0）。 */
+export function mergeUserModelTokens(
+  quotaRows: UserModelQuotaRow[],
+  tokenRows: UserModelTokenRow[],
+): UserModelAggregateRow[] {
+  const tokensByModel = new Map<string, UserModelTokenRow>();
+  for (const row of tokenRows) tokensByModel.set(row.model_name, row);
+
+  return quotaRows.map((row) => {
+    const tokens = tokensByModel.get(row.model_name);
+    const promptTokens = tokens?.prompt_tokens ?? 0;
+    const completionTokens = tokens?.completion_tokens ?? 0;
+    return {
+      model_name: row.model_name,
+      total_quota: row.total_quota,
+      // 与总览一致：quota_data.token_used 有 ≤5 分钟延迟，取与拆分和的较大值
+      total_tokens: Math.max(row.total_tokens, promptTokens + completionTokens),
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+    };
+  });
 }
 
 function shareOf(part: number, total: number): number {
@@ -345,20 +440,25 @@ function shareOf(part: number, total: number): number {
   return Number((part / total).toFixed(4));
 }
 
-/** 模型聚合行 → 响应行（附 Token 占比；分母为 0 记 0，不产生 NaN）。 */
+/**
+ * 模型聚合行 → 响应行（附 Token 占比）。
+ * 占比分母为 logs 的 prompt+completion（拆分口径一致）；totalTokens 仍取 quota_data.token_used，
+ * 两者可能有最多 5 分钟延迟差（已在 docs/db-schema-notes.md §4 记录）。
+ */
 export function toUserModels(rows: UserModelAggregateRow[]): UserModelRow[] {
   return rows.map((row) => {
     const totalTokens = toInteger(row.total_tokens);
     const promptTokens = toInteger(row.prompt_tokens);
     const completionTokens = toInteger(row.completion_tokens);
+    const splitTotal = promptTokens + completionTokens;
     return {
       modelName: row.model_name,
       totalQuota: toInteger(row.total_quota),
       totalTokens,
       promptTokens,
       completionTokens,
-      promptShare: shareOf(promptTokens, totalTokens),
-      completionShare: shareOf(completionTokens, totalTokens),
+      promptShare: shareOf(promptTokens, splitTotal),
+      completionShare: shareOf(completionTokens, splitTotal),
     };
   });
 }
@@ -380,7 +480,7 @@ export interface UserRecentDbRow {
 }
 
 /**
- * 最近使用记录：该用户最近 50 条 logs（`created_at DESC`）。
+ * 最近使用记录：该用户最近 50 条**消费** logs（`created_at DESC`）。
  * 口径定稿：不按查询区间过滤（「最近使用」是全局最近记录），固定 LIMIT 50。
  */
 export function buildUserRecentQuery(
@@ -390,8 +490,11 @@ export function buildUserRecentQuery(
 ) {
   return db
     .selectFrom("logs")
+    .where(EXCLUDE_STAT_USERS_SQL)
     .select(["created_at", "model_name", "quota", "prompt_tokens", "completion_tokens"])
+    .where("type", "=", LOG_TYPE_CONSUME)
     .where("user_id", "=", userId)
+    .where("model_name", "is not", null)
     .orderBy("created_at", "desc")
     .limit(limit);
 }
@@ -406,15 +509,19 @@ export function toUserRecent(rows: UserRecentDbRow[]): UserRecentRow[] {
   }));
 }
 
-/** 执行单用户模型分布 + 最近记录（并发）。 */
+/** 执行单用户模型分布 + 最近记录（并发；Token 拆分来自 logs）。 */
 export async function runUserModelsQuery(
   userId: number,
   range: QueryRange,
   db: ReadOnlyDatabase = getDb(),
 ): Promise<{ models: UserModelRow[]; recent: UserRecentRow[] }> {
-  const [modelRows, recentRows] = await Promise.all([
-    buildUserModelsQuery(db, userId, range).execute() as Promise<UserModelAggregateRow[]>,
+  const [quotaRows, tokenRows, recentRows] = await Promise.all([
+    buildUserModelsQuery(db, userId, range).execute() as Promise<UserModelQuotaRow[]>,
+    buildUserModelTokensQuery(db, userId, range).execute() as Promise<UserModelTokenRow[]>,
     buildUserRecentQuery(db, userId).execute() as Promise<UserRecentDbRow[]>,
   ]);
-  return { models: toUserModels(modelRows), recent: toUserRecent(recentRows) };
+  return {
+    models: toUserModels(mergeUserModelTokens(quotaRows, tokenRows)),
+    recent: toUserRecent(recentRows),
+  };
 }

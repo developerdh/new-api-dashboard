@@ -1,8 +1,8 @@
 /**
- * BE-M1-02 单测：§5.1 SQL 口径（编译断言）、overview 参数缺省、缓存命中、路由响应/错误格式。
+ * 单测：§5.1 SQL 口径（编译断言）、overview 参数缺省、缓存命中、路由响应/错误格式。
  *
  * 约束：无真实数据库——SQL 层用 Kysely `compile()` 断言（不执行），业务层 mock `runOverviewQuery`。
- * 数值对数（demo 库 / 真实库）见执行报告「未执行项」，并入 LH-04。
+ * 数值对数待真实库校验。
  */
 import { Kysely, PostgresDialect } from "kysely";
 import { Pool } from "pg";
@@ -90,23 +90,25 @@ describe("§5.1 SQL 编译口径（只读 + 参数化）", () => {
     expect(compiled.sql).toContain('from "quota_data"');
     expect(compiled.sql).toContain("COALESCE(SUM(quota), 0)::bigint as \"total_quota\"");
     expect(compiled.sql).toContain("COALESCE(SUM(token_used), 0)::bigint as \"total_tokens\"");
-    expect(compiled.sql).toContain("COALESCE(SUM(prompt_tokens), 0)::bigint as \"prompt_tokens\"");
-    expect(compiled.sql).toContain(
-      'COALESCE(SUM(completion_tokens), 0)::bigint as "completion_tokens"',
-    );
     expect(compiled.sql).toContain('COUNT(DISTINCT user_id)::bigint as "active_users"');
     expect(compiled.sql).toContain('COUNT(DISTINCT model_name)::bigint as "model_count"');
     expect(compiled.sql).toMatch(/"created_at"\s*>=\s*\$1/);
     expect(compiled.sql).toMatch(/"created_at"\s*<\s*\$2/);
   });
 
-  it("请求数走 logs 的 COUNT(*)，与 quota_data 聚合分离", () => {
+  it("请求数与 Token 拆分走 logs 消费流水（type=2），与 quota_data 聚合分离", () => {
     const compiled = buildRequestCountQuery(db, { start: RANGE_START, end: RANGE_END }).compile();
 
     expect(compiled.sql).toContain('from "logs"');
     expect(compiled.sql).toContain('COUNT(*)::bigint as "request_count"');
-    expect(compiled.sql).toMatch(/"created_at"\s*>=\s*\$1/);
-    expect(compiled.sql).toMatch(/"created_at"\s*<\s*\$2/);
+    expect(compiled.sql).toContain('COALESCE(SUM(prompt_tokens), 0)::bigint as "prompt_tokens"');
+    expect(compiled.sql).toContain(
+      'COALESCE(SUM(completion_tokens), 0)::bigint as "completion_tokens"',
+    );
+    expect(compiled.sql).toMatch(/"type"\s*=\s*\$1/);
+    expect(compiled.sql).toMatch(/"created_at"\s*>=\s*\$2/);
+    expect(compiled.sql).toMatch(/"created_at"\s*<\s*\$3/);
+    expect(compiled.parameters).toEqual([2, RANGE_START, RANGE_END]);
   });
 
   it("区间以参数下发，不拼接进 SQL（注入面为零）", () => {
@@ -134,12 +136,10 @@ describe("§5.1 SQL 编译口径（只读 + 参数化）", () => {
         {
           total_quota: 123_456,
           total_tokens: 1_000_000,
-          prompt_tokens: 700_000,
-          completion_tokens: 300_000,
           active_users: 12,
           model_count: 5,
         },
-        { request_count: 789 },
+        { request_count: 789, prompt_tokens: 700_000, completion_tokens: 300_000 },
       ),
     ).toEqual(SNAPSHOT);
 
@@ -148,17 +148,19 @@ describe("§5.1 SQL 编译口径（只读 + 参数化）", () => {
         {
           total_quota: "10" as unknown as number,
           total_tokens: "20" as unknown as number,
-          prompt_tokens: "30" as unknown as number,
-          completion_tokens: "40" as unknown as number,
           active_users: "50" as unknown as number,
           model_count: "60" as unknown as number,
         },
-        { request_count: "70" as unknown as number },
+        {
+          request_count: "70" as unknown as number,
+          prompt_tokens: "30" as unknown as number,
+          completion_tokens: "40" as unknown as number,
+        },
       ),
     ).toEqual({
       totalQuota: 10,
       requestCount: 70,
-      totalTokens: 20,
+      totalTokens: 70,
       promptTokens: 30,
       completionTokens: 40,
       activeUsers: 50,

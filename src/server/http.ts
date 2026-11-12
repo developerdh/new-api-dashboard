@@ -1,5 +1,5 @@
 /**
- * API 统一响应封装（BE-M1-01 / 方案 §4）。
+ * API 统一响应封装（方案 §4）。
  *
  * 成功：`{ ok: true, data, meta: { range, granularity, cached } }`
  * 失败：`{ ok: false, error: { code, message, issues? } }`
