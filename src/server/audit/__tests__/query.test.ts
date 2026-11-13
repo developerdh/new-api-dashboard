@@ -63,4 +63,12 @@ describe("parseThreadQuery", () => {
     expect(parseThreadQuery("0123456789abcdef", params).sessionKey).toBe("0123456789abcdef");
     expect(() => parseThreadQuery("XYZ", params)).toThrow();
   });
+
+  it("与列表接口同口径：也支持 date 单独指定某一天", () => {
+    const parsed = parseThreadQuery("0123456789abcdef", q({ date: "2026-11-13" }));
+    expect(parsed.date).toBe("2026-11-13");
+    expect(parsed.start).toBe(DAY_START);
+    expect(parsed.end).toBe(DAY_START + 86_400);
+    expect(() => parseThreadQuery("0123456789abcdef", q({ date: "2026-11-31" }))).toThrow();
+  });
 });

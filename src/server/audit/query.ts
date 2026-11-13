@@ -175,6 +175,8 @@ export interface ThreadQuery {
   sessionKey: string;
   start: number;
   end: number;
+  /** 指定单个自然日（东八区）；给了就覆盖 start/end，与列表接口口径一致 */
+  date?: string;
 }
 
 export function parseThreadQuery(rawSessionKey: string, searchParams: URLSearchParams): ThreadQuery {
@@ -189,8 +191,13 @@ export function parseThreadQuery(rawSessionKey: string, searchParams: URLSearchP
   if (!/^[0-9a-f]{16}$/.test(sessionKey)) {
     invalid("sessionKey", "sessionKey 必须是 16 位小写十六进制");
   }
-  const start = parseEpoch(searchParams.get("start"), "start");
-  const end = parseEpoch(searchParams.get("end"), "end");
-  if (start >= end) invalid("end", "end 必须大于 start（区间左闭右开）");
-  return { userId, sessionKey, start, end };
+  // 与 /api/audit/sessions 共用窗口解析：支持 date，也支持 start/end
+  const window = resolveWindow(searchParams);
+  return {
+    userId,
+    sessionKey,
+    start: window.start,
+    end: window.end,
+    ...(window.date === undefined ? {} : { date: window.date }),
+  };
 }
