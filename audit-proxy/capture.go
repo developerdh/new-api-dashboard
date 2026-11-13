@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
@@ -37,6 +38,9 @@ type indexEntry struct {
 	TR int    `json:"tr"`
 	E  string `json:"e,omitempty"`
 	IP string `json:"ip,omitempty"`
+	// K 会话键哈希（sha256(key) 前 16 位十六进制），缺失表示该协议/客户端未提供会话标识。
+	// 只存哈希：键可能含租户、项目等业务标识，且分组只需要可比较的稳定值。
+	K string `json:"k,omitempty"`
 }
 
 const (
@@ -48,7 +52,14 @@ var (
 	tracePattern  = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
 	modelPattern  = regexp.MustCompile(`"model"\s*:\s*"([^"\\]{1,128})"`)
 	streamPattern = regexp.MustCompile(`"stream"\s*:\s*true`)
-	peekLimit     = 8 << 10
+
+	// prompt_cache_key 在请求体中位置不固定（实测 34–160 KB），因此 peek 放大到 256 KB。
+	// 代价是每请求最多多占 256 KB 内存，转发路径与落盘上限不受影响。
+	promptCacheKeyPattern = regexp.MustCompile(`"prompt_cache_key"\s*:\s*"([^"\\]{1,256})"`)
+	// Claude Code 把 session_id 塞在 metadata.user_id 的 JSON 字符串里（引号被转义）。
+	claudeSessionPattern = regexp.MustCompile(`\\?"session_id\\?"\s*:\s*\\?"([A-Za-z0-9._:-]{1,128})\\?"`)
+
+	peekLimit = 256 << 10
 )
 
 type sink struct {
@@ -91,12 +102,13 @@ type record struct {
 	trunc  int
 	failed bool
 
-	peek      []byte
-	model     string
-	isStream  bool
-	firstByte time.Time
-	status    int
-	errMsg    string
+	peek       []byte
+	model      string
+	isStream   bool
+	sessionKey string
+	firstByte  time.Time
+	status     int
+	errMsg     string
 }
 
 func (s *sink) begin(r *http.Request) *record {
@@ -269,6 +281,7 @@ func (r *record) finish(errMsg string) {
 		r.model = string(m[1])
 	}
 	r.isStream = streamPattern.Match(r.peek)
+	r.sessionKey = extractSessionKey(r.path, r.peek)
 
 	entry := indexEntry{
 		T:  r.trace,
@@ -286,6 +299,7 @@ func (r *record) finish(errMsg string) {
 		TR: r.trunc,
 		E:  r.errMsg,
 		IP: r.ip,
+		K:  sessionKeyHash(r.sessionKey),
 	}
 	if !r.firstByte.IsZero() {
 		entry.FT = r.firstByte.Sub(r.start).Milliseconds()
@@ -370,6 +384,40 @@ func (s *sink) appendIndex(day time.Time, entry indexEntry) {
 	if _, err := f.Write(line); err != nil {
 		logEvent("warn", "index_write_failed", map[string]any{"date": name, "error": err.Error()})
 	}
+}
+
+// extractSessionKey 按协议取会话标识；取不到就返回空串（看板按请求级展示）。
+//
+// 只认“会话级”字段：
+// - OpenAI Responses / Chat Completions / Completions：prompt_cache_key
+// - Claude Messages：metadata.user_id 内的 session_id（Claude Code 会自动带）
+//
+// 刻意不用 `user` / 纯 user_id：那是用户维度，会把同一用户的多个会话错误合并。
+func extractSessionKey(path string, peek []byte) string {
+	switch path {
+	case "/v1/responses", "/v1/chat/completions", "/v1/completions":
+		if m := promptCacheKeyPattern.FindSubmatch(peek); len(m) == 2 {
+			return string(m[1])
+		}
+	case "/v1/messages":
+		scope := peek
+		if i := bytes.Index(peek, []byte(`"metadata"`)); i >= 0 {
+			scope = peek[i:]
+		}
+		if m := claudeSessionPattern.FindSubmatch(scope); len(m) == 2 {
+			return string(m[1])
+		}
+	}
+	return ""
+}
+
+// sessionKeyHash 只留可比较的哈希：原始键可能含业务标识，且看板只需要稳定分组。
+func sessionKeyHash(key string) string {
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:8])
 }
 
 func pickTrace(r *http.Request) string {
