@@ -23,6 +23,7 @@ import {
   resolveRangeFromParams,
   type RangePreset,
 } from "@/lib/time-range";
+import { AuditDatePicker } from "@/components/audit/audit-date-picker";
 import { cn } from "@/lib/utils";
 
 function dateInputToSeconds(value: string): number | null {
@@ -86,9 +87,6 @@ export function TimeRangePicker({ className }: { className?: string }) {
     return range.start === current.start && range.end === current.end;
   })?.key;
 
-  const inputClass =
-    "h-8 rounded-md border border-input bg-background px-2 text-xs tabular-nums outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
-
   return (
     <div
       className={cn(
@@ -117,20 +115,22 @@ export function TimeRangePicker({ className }: { className?: string }) {
 
       <div className="flex items-center gap-1.5 text-sm">
         <CalendarDays className="size-4 text-muted-foreground" aria-hidden="true" />
-        <input
-          type="date"
-          value={customStart}
-          onChange={(event) => setCustomStart(event.target.value)}
-          className={inputClass}
-          aria-label="开始日期"
+        <AuditDatePicker
+          value={customStart === "" ? null : customStart}
+          onChange={(next) => setCustomStart(next ?? "")}
+          max={customEnd === "" ? undefined : customEnd}
+          placeholder="开始日期"
+          clearable={false}
+          ariaLabel="开始日期"
         />
         <span className="text-xs text-muted-foreground">至</span>
-        <input
-          type="date"
-          value={customEnd}
-          onChange={(event) => setCustomEnd(event.target.value)}
-          className={inputClass}
-          aria-label="结束日期"
+        <AuditDatePicker
+          value={customEnd === "" ? null : customEnd}
+          onChange={(next) => setCustomEnd(next ?? "")}
+          min={customStart === "" ? undefined : customStart}
+          placeholder="结束日期"
+          clearable={false}
+          ariaLabel="结束日期"
         />
         <Button
           type="button"
