@@ -43,6 +43,8 @@ import type { UserOverviewSnapshot } from "@/server/queries/user";
 import type { TrendSeries } from "@/server/queries/trend";
 import type { UserModelRow, UserRecentRow } from "@/server/queries/user";
 
+import { AuditSessions } from "./audit-sessions";
+
 const HEATMAP_DAYS = 183;
 const RECENT_PAGE_SIZE = 10;
 
@@ -372,6 +374,8 @@ export function UserClient({ userId }: { userId: string }) {
           </SectionBody>
         </div>
       </Card>
+
+      <AuditSessions userId={userId} start={range.start} end={range.end} />
 
       <Card className="gap-3 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">

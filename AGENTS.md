@@ -11,6 +11,7 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 | `docs/deployment.md` | 构建、打包、部署与回滚 |
 | `docs/troubleshooting.md` | 常见问题排查（按现象索引，含反代与登录问题） |
 | `docs/nginx.example.conf` | 反向代理参考配置（`Host` 必须 `$http_host`） |
+| `docs/audit-proxy/` | 提示词与响应采集（audit-proxy）的背景、设计、部署与决策 |
 | `SECURITY.md` | 漏洞报告渠道与部署安全前提 |
 | `CONTRIBUTING.md` | 开发环境、提交规范、代码红线与 PR 流程 |
 | `CHANGELOG.md` | 版本变更记录（发版时更新） |
@@ -50,3 +51,4 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 3. **分层约束**：服务端聚合，前端只展示；查询会话固定 `statement_timeout = 30s`。
 4. **目录骨架**：`src/components/ui` 为 shadcn/ui 源码；`src/components/{cards,charts}` 为看板封装；`src/server/{db.ts,cache.ts,queries,services}` 为服务端层。
 5. **方案变更**：`docs/方案.md` 的修改须经维护者批准后执行。
+6. **审计正文只读**：会话正文来自 `AUDIT_DIR` 的本地文件（生产 `:ro` 挂载），读取层 `src/server/audit/` 与 `getDb()` 完全隔离；不写入、不建表、不提供删除接口。
