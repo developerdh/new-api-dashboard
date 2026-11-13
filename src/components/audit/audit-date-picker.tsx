@@ -7,12 +7,13 @@
  * 塞一个月历进去不好控；原生 date 输入又完全不可定制。这里只依赖一个容器 ref +
  * 外部点击/Esc 关闭，零新依赖、键盘可达。
  *
- * 口径：全部用 `YYYY-MM-DD` 字符串比较，不碰 Date 的本地时区；可选范围由 `min`/`max`
- * 限定为当前查询区间（审计索引本来也只有这些天有数据），越界日期直接禁用。
+ * 口径：全部用 `YYYY-MM-DD` 字符串比较，不碰 Date 的本地时区；`min`/`max` 给了就限定
+ * 可选范围（越界禁用），不传则不限制——全局时间选择器就是无限制的起止日期场景。
  */
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { shanghaiDateOf } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
@@ -39,6 +40,9 @@ function pad(value: number): string {
 function toDate(year: number, month: number, day: number): string {
   return `${year}-${pad(month)}-${pad(day)}`;
 }
+
+/** 模块加载时取一次「今天」，只用于日历初始定位与「今天」标记（长驻页面跨天最多差一天）。 */
+const TODAY = shanghaiDateOf(Math.floor(Date.now() / 1000));
 
 /** 用 UTC 构造做「某月 1 号是周几 / 该月几天」的纯算术，避开本地时区。 */
 export function buildMonth(year: number, month: number): Cell[] {
@@ -74,15 +78,24 @@ export function AuditDatePicker({
   onChange,
   min,
   max,
+  placeholder = "全部日期",
+  clearable = true,
+  ariaLabel = "按日期过滤",
 }: {
   value: string | null;
   onChange: (next: string | null) => void;
-  /** 可选范围（含端点），YYYY-MM-DD */
-  min: string;
-  max: string;
+  /** 可选范围（含端点），YYYY-MM-DD；不传则不限制 */
+  min?: string;
+  max?: string;
+  /** 未选中时触发器上的占位文本 */
+  placeholder?: string;
+  /** 是否提供「全部日期」清除；区间选择器（必选起止）场景用不到 */
+  clearable?: boolean;
+  /** 触发器的可访问名称 */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const initial = parse(value ?? max);
+  const initial = parse(value ?? max ?? min ?? TODAY);
   const [cursor, setCursor] = useState({ year: initial.year, month: initial.month });
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -103,18 +116,25 @@ export function AuditDatePicker({
   }, [open]);
 
   const cells = useMemo(() => buildMonth(cursor.year, cursor.month), [cursor]);
-  const minParts = parse(min);
-  const maxParts = parse(max);
-  const minMonthIndex = minParts.year * 12 + minParts.month;
-  const maxMonthIndex = maxParts.year * 12 + maxParts.month;
+  const minParts = min === undefined ? null : parse(min);
+  const maxParts = max === undefined ? null : parse(max);
+  const minMonthIndex = minParts?.year === undefined ? null : minParts.year * 12 + minParts.month;
+  const maxMonthIndex = maxParts?.year === undefined ? null : maxParts.year * 12 + maxParts.month;
   const cursorMonthIndex = cursor.year * 12 + cursor.month;
+  const outOfRange = (date: string): boolean =>
+    (min !== undefined && date < min) || (max !== undefined && date > max);
 
-  // 年份下拉覆盖可选区间，外加当前正在浏览的年份（前面板可能翻到区间外）
+  // 年份下拉覆盖可选区间；无限制场景给当前年份 ±10 年，外加正在浏览的年份
   const years = useMemo(() => {
     const set = new Set<number>([cursor.year]);
-    for (let year = minParts.year; year <= maxParts.year; year += 1) set.add(year);
+    const currentYear = Number(TODAY.slice(0, 4));
+    const lower = minParts?.year ?? currentYear - 10;
+    const upper = maxParts?.year ?? currentYear + 10;
+    for (let year = Math.min(lower, cursor.year); year <= Math.max(upper, cursor.year); year += 1) {
+      set.add(year);
+    }
     return [...set].sort((a, b) => a - b);
-  }, [cursor.year, minParts.year, maxParts.year]);
+  }, [cursor.year, minParts?.year, maxParts?.year]);
 
   const shiftMonth = (delta: number): void => {
     setCursor((current) => {
@@ -128,14 +148,14 @@ export function AuditDatePicker({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        aria-label="按日期过滤"
+        aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         title="按日期过滤（只查看所选自然日）"
         className="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs tabular-nums shadow-xs outline-none transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
       >
         <span className={value === null ? "text-muted-foreground" : ""}>
-          {value ?? "全部日期"}
+          {value ?? placeholder}
         </span>
         <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
       </button>
@@ -152,7 +172,7 @@ export function AuditDatePicker({
               type="button"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-30"
               onClick={() => shiftMonth(-1)}
-              disabled={cursorMonthIndex <= minMonthIndex}
+              disabled={minMonthIndex !== null && cursorMonthIndex <= minMonthIndex}
               aria-label="上一个月"
             >
               <ChevronLeft className="size-4" />
@@ -187,7 +207,7 @@ export function AuditDatePicker({
               type="button"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-30"
               onClick={() => shiftMonth(1)}
-              disabled={cursorMonthIndex >= maxMonthIndex}
+              disabled={maxMonthIndex !== null && cursorMonthIndex >= maxMonthIndex}
               aria-label="下一个月"
             >
               <ChevronRight className="size-4" />
@@ -201,8 +221,9 @@ export function AuditDatePicker({
               </div>
             ))}
             {cells.map((cell) => {
-              const disabled = cell.date < min || cell.date > max;
+              const disabled = outOfRange(cell.date);
               const selected = cell.date === value;
+              const isToday = cell.date === TODAY;
               return (
                 <button
                   key={cell.date}
@@ -218,6 +239,7 @@ export function AuditDatePicker({
                     "mx-auto flex size-8 items-center justify-center rounded-full text-xs tabular-nums transition-colors",
                     "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none",
                     !cell.inMonth && "text-muted-foreground/60",
+                    isToday && !selected && "ring-1 ring-primary",
                     selected && "bg-primary font-semibold text-primary-foreground hover:bg-primary",
                     disabled && "pointer-events-none opacity-25",
                   )}
@@ -229,19 +251,27 @@ export function AuditDatePicker({
           </div>
 
           <div className="mt-2 flex items-center justify-between border-t pt-2 text-xs">
-            <button
-              type="button"
-              className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={() => {
-                onChange(null);
-                setOpen(false);
-              }}
-            >
-              全部日期
-            </button>
-            <span className="text-[11px] text-muted-foreground">
-              {min} ~ {max}
-            </span>
+            {clearable ? (
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+              >
+                全部日期
+              </button>
+            ) : (
+              <span />
+            )}
+            {min !== undefined && max !== undefined ? (
+              <span className="text-[11px] text-muted-foreground">
+                {min} ~ {max}
+              </span>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">今天 {TODAY}</span>
+            )}
           </div>
         </div>
       ) : null}

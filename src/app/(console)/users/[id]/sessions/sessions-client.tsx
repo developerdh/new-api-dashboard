@@ -9,11 +9,12 @@
  * - **只有表格区滚动**（`flex-1 min-h-0 overflow-auto`），表头 `sticky top-0` 吸顶；
  * - 页脚（已加载 / 每次条数 / 加载更多）也在滚动区之外，始终够得着。
  *
- * 累加实现：不做客户端 append，而是把 `limit` 从 20 递增（`page` 恒为 1），
- * 服务端每次返回「前 N 条」，天然去重、不会因新写入而错位。
+ * 累加实现：真正的**分页追加**——`limit` 固定为步长（20/50，不超过服务端单页上限 100），
+ * 「加载更多」把 `page` 加一，响应到达后按 `page` 合并进本地列表（page=1 替换、page>1 去重追加）。
+ * 之前「把 limit 一路加到 131」的实现会撞上服务端单页上限，属于实现错误。
  */
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
 
 import { AuditDetailDialog } from "@/components/audit/audit-detail-dialog";
 import { AuditThreadDialog } from "@/components/audit/audit-thread-dialog";
@@ -37,10 +38,19 @@ import type {
   AuditSessionRow,
 } from "@/server/audit/types";
 
-/** 每次加载的步长（可切）。 */
+/** 每次加载的步长（可切）；不得超过服务端 `AUDIT_MAX_PAGE_SIZE`。 */
 const STEPS = [20, 50] as const;
-/** 累加上限：再多就该用日期/条件收窄，而不是一路滚到底。 */
-const MAX_ROWS = 500;
+
+type Row = AuditConversationRow | AuditSessionRow;
+
+function keyOf(grouped: boolean, row: Row): string {
+  if (!grouped) {
+    const r = row as AuditSessionRow;
+    return `${r.date}-${r.traceId}-${r.fp}`;
+  }
+  const key = (row as AuditConversationRow).sessionKey;
+  return key === undefined ? `single:${(row as AuditConversationRow).last.traceId}` : key;
+}
 
 function Notice({ children }: { children: ReactNode }) {
   return (
@@ -66,7 +76,9 @@ export function SessionsClient({ userId }: { userId: string }) {
     };
   });
   const [step, setStep] = useState<number>(STEPS[0]);
-  const [limit, setLimit] = useState<number>(STEPS[0]);
+  const [page, setPage] = useState(1);
+  /** 累积的行：page=1 替换、page>1 去重追加。 */
+  const [rows, setRows] = useState<Row[]>([]);
   const [selected, setSelected] = useState<AuditSessionRow | null>(null);
   const [thread, setThread] = useState<AuditConversationRow | null>(null);
 
@@ -79,35 +91,64 @@ export function SessionsClient({ userId }: { userId: string }) {
     start: String(range.start),
     end: String(range.end),
     group: view.group,
-    limit: String(limit),
-    page: "1",
+    limit: String(step),
+    page: String(page),
   });
   if (activeDate !== null) params.set("date", activeDate);
   if (view.stream !== "all") params.set("stream", view.stream === "stream" ? "true" : "false");
   if (view.failedOnly) params.set("failed", "true");
 
   const api = useApi<AuditSessionList>(`/api/audit/sessions?${params.toString()}`);
+
+  // 响应合并：page=1 替换、page>1 追加。分组与否、页码、每页条数都在响应里，
+  // 合并逻辑只依赖 api.data，避免与视图状态产生时序耦合。
+  useEffect(() => {
+    const d = api.data;
+    if (d === undefined || d.available !== true) return;
+    const incoming: Row[] = d.grouped ? (d.conversations ?? []) : d.sessions;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部响应（URL 数据）→ 本地累积列表
+    setRows((current) => {
+      if (d.page <= 1) return incoming;
+      const seen = new Set(current.map((row) => keyOf(d.grouped, row)));
+      const merged = [...current];
+      for (const row of incoming) {
+        const key = keyOf(d.grouped, row);
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(row);
+        }
+      }
+      return merged;
+    });
+  }, [api.data]);
+
   const data = api.data;
   const matched = data !== undefined && data.grouped === (view.group === "session");
-  const sessions = matched ? data.sessions : [];
-  const conversations = matched ? (data.conversations ?? []) : [];
-  const loaded = view.group === "session" ? conversations.length : sessions.length;
   const total = matched ? data.total : null;
   const partial = matched && data.partial === true;
-  const atCap = limit >= MAX_ROWS;
+  const grouped = view.group === "session";
+  const loaded = rows.length;
+  // 末次响应是否满页：满页才可能还有下一页（total 不可知的请求视图用这个判断）
+  const lastPageFull =
+    matched &&
+    (data.grouped ? (data.conversations ?? []).length : data.sessions.length) === data.pageSize;
+  const canLoadMore = total === null ? lastPageFull : loaded < total;
 
+  const reset = (): void => {
+    setRows([]);
+    setPage(1);
+  };
   const changeView = (patch: Partial<SessionView>): void => {
     setView((current) => ({ ...current, ...patch }));
-    setLimit(step);
+    reset();
   };
 
   /** 标题展示「昵称 用户名」；都没有时回退到编号（URL 没带身份参数的直达场景）。 */
   const title = [displayName, username].filter(Boolean).join(" ") || `用户 #${userId}`;
-  const canLoadMore = !atCap && (total === null ? loaded >= limit : loaded < total);
-  const ungrouped =
-    view.group === "session"
-      ? conversations.filter((row) => row.sessionKey === undefined).length
-      : sessions.filter((row) => row.sessionKey === undefined).length;
+  const ungrouped = rows.filter((row) => keyOf(grouped, row).startsWith("single:")).length;
+
+  const conversationRows = grouped ? (rows as AuditConversationRow[]) : [];
+  const sessionRows = grouped ? [] : (rows as AuditSessionRow[]);
 
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-height)-3rem)] min-h-[360px] flex-col gap-3 overflow-hidden">
@@ -121,7 +162,7 @@ export function SessionsClient({ userId }: { userId: string }) {
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pb-3">
           <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
             <span className="text-sm font-semibold text-foreground">
-              {view.group === "session" ? "会话列表" : "请求列表"}
+              {grouped ? "会话列表" : "请求列表"}
             </span>
             <span>
               {activeDate === null ? "所选区间内" : activeDate}
@@ -133,7 +174,10 @@ export function SessionsClient({ userId }: { userId: string }) {
             onChange={changeView}
             dates={dates}
             refreshing={api.loading}
-            onRefresh={api.refresh}
+            onRefresh={() => {
+              reset();
+              api.refresh();
+            }}
           />
         </div>
 
@@ -186,16 +230,16 @@ export function SessionsClient({ userId }: { userId: string }) {
 
               {/* 唯一的滚动区；内层 table-container 让位给这里，粘性表头才会生效 */}
               <div className="min-h-0 flex-1 overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
-                {view.group === "session" ? (
+                {grouped ? (
                   <ConversationTable
-                    rows={conversations}
+                    rows={conversationRows}
                     onOpen={(row) => {
                       if (row.sessionKey === undefined) setSelected(row.last);
                       else setThread(row);
                     }}
                   />
                 ) : (
-                  <RequestTable rows={sessions} onOpen={setSelected} />
+                  <RequestTable rows={sessionRows} onOpen={setSelected} />
                 )}
               </div>
 
@@ -219,24 +263,27 @@ export function SessionsClient({ userId }: { userId: string }) {
                         aria-pressed={step === size}
                         onClick={() => {
                           setStep(size);
-                          setLimit(size);
+                          reset();
                         }}
                       >
                         {size}
                       </Button>
                     ))}
                   </div>
-                  {canLoadMore ? (
+                  {api.loading && page > 1 ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      加载中…
+                    </span>
+                  ) : canLoadMore ? (
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => setLimit((value) => Math.min(MAX_ROWS, value + step))}
+                      onClick={() => setPage((value) => value + 1)}
                     >
                       加载更多
                     </Button>
-                  ) : atCap ? (
-                    <span>已达 {MAX_ROWS} 条上限，请按日期或条件收窄</span>
                   ) : (
                     <span>已是全部</span>
                   )}
