@@ -41,6 +41,7 @@ function useRangeQuery(): string {
 
 function pageTitle(pathname: string): string {
   if (pathname.startsWith("/models")) return "模型分析";
+  if (/\/users\/[^/]+\/sessions(?:\/|$)/.test(pathname)) return "会话记录";
   if (pathname.startsWith("/users/")) return "用户详情";
   if (pathname.startsWith("/dashboard")) return "全局总览";
   return "控制台";
