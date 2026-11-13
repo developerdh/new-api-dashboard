@@ -46,6 +46,39 @@ export function shanghaiMonthStart(epochSeconds: number): number {
   return localMonthStart - SHANGHAI_OFFSET_SECONDS;
 }
 
+/** 东八区自然日 `YYYY-MM-DD`（避免为一处格式化再引一份 Intl 实例）。 */
+export function shanghaiDateOf(epochSeconds: number): string {
+  const local = new Date((epochSeconds + SHANGHAI_OFFSET_SECONDS) * 1000);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}`;
+}
+
+/**
+ * 区间覆盖的自然日列表（**倒序**，新→旧），供界面「按日期过滤」下拉使用。
+ * `end` 为右开区间，因此取 `end - 1` 所在的日期；`max` 防止手改 URL 传入超长区间。
+ */
+export function listDaysInRange(start: number, end: number, max = 62): string[] {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+  const days: string[] = [];
+  let cursor = shanghaiDayStart(start);
+  while (cursor < end && days.length < max) {
+    days.push(shanghaiDateOf(cursor));
+    cursor += DAY_SECONDS;
+  }
+  return days.reverse();
+}
+
+/** 东八区自然日 → `[start, end)` 的 Unix 秒。 */
+export function dayRangeOf(date: string): TimeRange | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const milliseconds = Date.parse(`${date}T00:00:00+08:00`);
+  if (Number.isNaN(milliseconds)) return null;
+  const start = Math.floor(milliseconds / 1000);
+  // `2026-11-31` 会被 JS 归一化成 12-01，回验格式才能挡住非法日历日
+  if (shanghaiDateOf(start) !== date) return null;
+  return { start, end: start + DAY_SECONDS };
+}
+
 /** 今日（东八区自然日）区间。 */
 export function todayRange(nowSeconds: number = Math.floor(Date.now() / 1000)): TimeRange {
   const start = shanghaiDayStart(nowSeconds);

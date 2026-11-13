@@ -76,9 +76,12 @@ export function auditMaxWindowDays(): number {
   return value;
 }
 
-/** 单页上限：与查询层 `MAX_LIMIT` 同量级，避免一次拉爆响应体。 */
-export const AUDIT_MAX_PAGE_SIZE = 200;
-export const AUDIT_DEFAULT_PAGE_SIZE = 50;
+/**
+ * 单页条数：默认 20（界面翻页），上限 100（界面可切 50/100）。
+ * 与查询层 `MAX_LIMIT` 同量级，避免一次拉爆响应体。
+ */
+export const AUDIT_MAX_PAGE_SIZE = 100;
+export const AUDIT_DEFAULT_PAGE_SIZE = 20;
 
 /** 目录可用性：只做一次 `readdir`，失败即视为不可用（不抛错，路由按 `available:false` 处理）。 */
 export async function isAuditAvailable(dir: string | null = auditDir()): Promise<boolean> {
@@ -147,6 +150,18 @@ export function auditDateOf(epochSeconds: number): string {
   const pick = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((part) => part.type === type)?.value ?? "00";
   return `${pick("year")}-${pick("month")}-${pick("day")}`;
+}
+
+/** 东八区自然日 → `[start, end)` 的 Unix 秒（界面「按日期过滤」用）。 */
+export function auditDayRange(date: string): { start: number; end: number } {
+  if (!AUDIT_DATE_PATTERN.test(date)) throw new AuditQueryError("非法索引日期");
+  // 东八区无夏令时，固定 +08:00 即可，不必走 Intl 反查
+  const start = Math.floor(Date.parse(`${date}T00:00:00+08:00`) / 1000);
+  // `2026-11-31` 会被 JS 归一化成 12-01，必须回验一次格式才能挡住非法日历日
+  if (Number.isNaN(start) || auditDateOf(start) !== date) {
+    throw new AuditQueryError("非法索引日期");
+  }
+  return { start, end: start + 86_400 };
 }
 
 /**

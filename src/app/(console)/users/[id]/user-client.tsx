@@ -375,7 +375,13 @@ export function UserClient({ userId }: { userId: string }) {
         </div>
       </Card>
 
-      <AuditSessions userId={userId} start={range.start} end={range.end} />
+      <AuditSessions
+        userId={userId}
+        start={range.start}
+        end={range.end}
+        displayName={identity.displayName}
+        username={identity.username}
+      />
 
       <Card className="gap-3 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">

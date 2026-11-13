@@ -84,6 +84,18 @@ export function formatBytes(value: number): string {
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+/**
+ * 秒差 → 人类可读跨度（会话「起止跨度」用：`42 秒` / `12 分` / `3.2 小时` / `2.0 天`）。
+ * 只服务聚合列表的一列，不追求精确到分秒。
+ */
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${Math.round(seconds)} 秒`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分`;
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)} 小时`;
+  return `${(seconds / 86400).toFixed(1)} 天`;
+}
+
 /** 比例 → 百分比字符串（0.1234 → 12.3%）。 */
 export function formatPercent(value: number, digits = 1): string {
   if (!Number.isFinite(value)) return "—";

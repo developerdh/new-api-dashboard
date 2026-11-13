@@ -214,7 +214,7 @@ function pushOpenAiContent(
       continue;
     }
     const type = asString(record.type);
-    if (type === "text" || type === "input_text" || type === "output_text") {
+    if (type === "text" || type === "input_text" || type === "output_text" || type === "reasoning_text") {
       pushText(collector, role, messageIndex, asString(record.text) ?? "");
       continue;
     }
@@ -412,8 +412,37 @@ function parseRequest(protocol: AuditProtocol, text: string, truncated: boolean)
             if (typeof item === "string") pushText(collector, "user", index, item);
             return;
           }
-          const role = toRole(record.role);
-          pushOpenAiContent(collector, role, index, record.content);
+          const itemType = asString(record.type);
+          // 上一轮的工具调用与结果：属于助手/工具，而不是"未知"
+          if (itemType === "function_call") {
+            pushToolCall(
+              collector,
+              "assistant",
+              index,
+              asString(record.name),
+              asString(record.call_id),
+              asString(record.arguments),
+            );
+            return;
+          }
+          if (itemType === "function_call_output") {
+            const output = record.output;
+            collector.push("tool", "tool_result", index, {
+              text: typeof output === "string" ? output : (JSON.stringify(output ?? null) ?? ""),
+              tool: { callId: asString(record.call_id) },
+            });
+            return;
+          }
+          // 上一轮推理内容：助手产物，归入 other（不做正文假设）
+          if (itemType === "reasoning") {
+            pushOpenAiContent(collector, "assistant", index, record.content);
+            asArray(record.summary).forEach((part) => {
+              const summary = asString(asRecord(part)?.text);
+              if (summary !== undefined) pushText(collector, "assistant", index, summary);
+            });
+            return;
+          }
+          pushOpenAiContent(collector, toRole(record.role), index, record.content);
         });
       }
       break;
@@ -446,6 +475,14 @@ interface Usage {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  /** 命中缓存的输入 token（各协议字段名不同） */
+  cachedTokens?: number;
+  /** 写入缓存的 token（Anthropic 专有） */
+  cacheWriteTokens?: number;
+}
+
+function nestedNumber(record: JsonRecord | undefined, parent: string, key: string): number | undefined {
+  return asNumber(asRecord(record?.[parent])?.[key]);
 }
 
 function readOpenAiUsage(value: unknown): Usage | undefined {
@@ -454,11 +491,16 @@ function readOpenAiUsage(value: unknown): Usage | undefined {
   const prompt = asNumber(record.prompt_tokens);
   const completion = asNumber(record.completion_tokens);
   const total = asNumber(record.total_tokens);
-  if (prompt === undefined && completion === undefined && total === undefined) return undefined;
+  // OpenAI / 兼容网关：prompt_tokens_details.cached_tokens
+  const cached = nestedNumber(record, "prompt_tokens_details", "cached_tokens");
+  if (prompt === undefined && completion === undefined && total === undefined && cached === undefined) {
+    return undefined;
+  }
   return {
     ...(prompt === undefined ? {} : { promptTokens: prompt }),
     ...(completion === undefined ? {} : { completionTokens: completion }),
     ...(total === undefined ? {} : { totalTokens: total }),
+    ...(cached === undefined ? {} : { cachedTokens: cached }),
   };
 }
 
@@ -467,11 +509,15 @@ function readAnthropicUsage(value: unknown): Usage | undefined {
   if (record === undefined) return undefined;
   const input = asNumber(record.input_tokens);
   const output = asNumber(record.output_tokens);
-  if (input === undefined && output === undefined) return undefined;
+  const cached = asNumber(record.cache_read_input_tokens);
+  const cacheWrite = asNumber(record.cache_creation_input_tokens);
+  if (input === undefined && output === undefined && cached === undefined) return undefined;
   return {
     ...(input === undefined ? {} : { promptTokens: input }),
     ...(output === undefined ? {} : { completionTokens: output }),
     ...(input === undefined || output === undefined ? {} : { totalTokens: input + output }),
+    ...(cached === undefined ? {} : { cachedTokens: cached }),
+    ...(cacheWrite === undefined ? {} : { cacheWriteTokens: cacheWrite }),
   };
 }
 
@@ -481,11 +527,16 @@ function readResponsesUsage(value: unknown): Usage | undefined {
   const input = asNumber(record.input_tokens);
   const output = asNumber(record.output_tokens);
   const total = asNumber(record.total_tokens);
-  if (input === undefined && output === undefined && total === undefined) return undefined;
+  // Responses：input_tokens_details.cached_tokens
+  const cached = nestedNumber(record, "input_tokens_details", "cached_tokens");
+  if (input === undefined && output === undefined && total === undefined && cached === undefined) {
+    return undefined;
+  }
   return {
     ...(input === undefined ? {} : { promptTokens: input }),
     ...(output === undefined ? {} : { completionTokens: output }),
     ...(total === undefined ? {} : { totalTokens: total }),
+    ...(cached === undefined ? {} : { cachedTokens: cached }),
   };
 }
 
@@ -740,6 +791,7 @@ function parseAnthropicSse(events: SseEvent[]): ResponseParseResult {
   let usage: Usage | undefined;
   let done = false;
   let inputTokens: number | undefined;
+  let cachedTokens: number | undefined;
 
   for (const event of events) {
     const parsed = parseJson(event.data);
@@ -749,8 +801,11 @@ function parseAnthropicSse(events: SseEvent[]): ResponseParseResult {
     const type = event.event ?? asString(payload.type);
 
     if (type === "message_start") {
-      const startUsage = asNumber(asRecord(asRecord(payload.message)?.usage)?.input_tokens);
-      if (startUsage !== undefined) inputTokens = startUsage;
+      const startUsage = asRecord(asRecord(payload.message)?.usage);
+      const startInput = asNumber(startUsage?.input_tokens);
+      if (startInput !== undefined) inputTokens = startInput;
+      const startCached = asNumber(startUsage?.cache_read_input_tokens);
+      if (startCached !== undefined) cachedTokens = startCached;
       continue;
     }
     if (type === "content_block_start") {
@@ -786,6 +841,7 @@ function parseAnthropicSse(events: SseEvent[]): ResponseParseResult {
           ...(inputTokens === undefined ? {} : { promptTokens: inputTokens }),
           completionTokens: deltaUsage,
           ...(inputTokens === undefined ? {} : { totalTokens: inputTokens + deltaUsage }),
+          ...(cachedTokens === undefined ? {} : { cachedTokens }),
         };
       }
       done = true;
@@ -935,6 +991,25 @@ export interface NormalizeInput {
   responseBytes: number;
   requestCapped: boolean;
   responseCapped: boolean;
+}
+
+/**
+ * 只解请求侧的消息列表（线程增量用）。
+ *
+ * 不解析响应体：线程增量只关心「请求前缀到哪儿为止」，
+ * 跳过 SSE 扫描能省掉一次可能上千事件的解析。
+ */
+export function normalizeRequestMessages(input: {
+  entry: AuditIndexEntry;
+  requestText: string;
+  requestCapped: boolean;
+}): { messages: AuditBlock[]; parseError?: string } {
+  const truncated = (input.entry.tr & 1) === 1 || input.requestCapped;
+  const parsed = parseRequest(detectProtocol(input.entry.p), input.requestText, truncated);
+  return {
+    messages: parsed.blocks,
+    ...(parsed.parseError === undefined ? {} : { parseError: parsed.parseError }),
+  };
 }
 
 /**

@@ -28,7 +28,7 @@ function entry(overrides: Partial<AuditIndexEntry> = {}): AuditIndexEntry {
 const CHAT_REQ =
   '{"model":"gpt-4o-mini","stream":false,"messages":[{"role":"system","content":"你是一个测试助手"},{"role":"user","content":"非流式输入验证-ABCD"}]}';
 const CHAT_RES =
-  '{"id":"chatcmpl-mock","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"这是非流式返回内容"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":9,"total_tokens":21}}';
+  '{"id":"chatcmpl-mock","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"这是非流式返回内容"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":9,"total_tokens":21,"prompt_tokens_details":{"cached_tokens":4}}}';
 
 const SSE_RES = [
   'data: {"choices":[{"index":0,"delta":{"content":"你好"},"finish_reason":null}]}',
@@ -69,6 +69,7 @@ describe("非流式 JSON", () => {
       promptTokens: 12,
       completionTokens: 9,
       totalTokens: 21,
+      cachedTokens: 4,
     });
   });
 
@@ -206,13 +207,23 @@ describe("Anthropic 与 Responses", () => {
     const response = JSON.stringify({
       status: "completed",
       output: [{ type: "message", content: [{ type: "output_text", text: "2" }] }],
-      usage: { input_tokens: 8, output_tokens: 1, total_tokens: 9 },
+      usage: {
+        input_tokens: 8,
+        output_tokens: 1,
+        total_tokens: 9,
+        input_tokens_details: { cached_tokens: 6 },
+      },
     });
     const envelope = normalize({ p: "/v1/responses" }, request, response);
     expect(envelope.request.protocol).toBe("openai-responses");
     expect(envelope.request.messages.map((block) => block.role)).toEqual(["system", "user"]);
     expect(envelope.response.outputs[0]?.text).toBe("2");
-    expect(envelope.response.usage?.totalTokens).toBe(9);
+    expect(envelope.response.usage).toEqual({
+      promptTokens: 8,
+      completionTokens: 1,
+      totalTokens: 9,
+      cachedTokens: 6,
+    });
   });
 });
 
