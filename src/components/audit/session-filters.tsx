@@ -6,17 +6,11 @@
  * 状态用单对象 `SessionView` 传：两处入口（用户详情卡片、独立页面）共用同一份口径，
  * 任一条件变化都由调用方把 `page` 重置回 1 —— 否则会出现「筛到只剩 1 页却停在第 3 页」。
  */
-import { CalendarDays, Loader2 } from "lucide-react";
+import { CalendarDays, RotateCw, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 export interface SessionView {
   /** 列表粒度 */
@@ -36,8 +30,9 @@ export const DEFAULT_SESSION_VIEW: SessionView = {
   date: null,
 };
 
-/** 下拉里的「全部日期」哨兵值（Radix Select 不接受空字符串作为 value）。 */
-const ALL_DATES = "__all__";
+/** 与全局 TimeRangePicker 的日期输入保持同一套视觉。 */
+const DATE_INPUT =
+  "h-8 rounded-md border border-input bg-background px-2 text-xs tabular-nums outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 function Chips<T extends string>({
   options,
@@ -122,23 +117,32 @@ export function SessionFilters({
       </Button>
 
       {dates.length < 2 ? null : (
-        <Select
-          value={view.date ?? ALL_DATES}
-          onValueChange={(next) => onChange({ date: next === ALL_DATES ? null : next })}
-        >
-          <SelectTrigger size="sm" className="ml-1 gap-1.5 px-2 text-xs" aria-label="按日期过滤">
-            <CalendarDays className="size-3.5 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="max-h-72" align="start">
-            <SelectItem value={ALL_DATES}>全部日期</SelectItem>
-            {dates.map((date) => (
-              <SelectItem key={date} value={date}>
-                {date}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="ml-1 flex items-center gap-1">
+          <CalendarDays className="size-3.5 text-muted-foreground" aria-hidden="true" />
+          <input
+            type="date"
+            value={view.date ?? ""}
+            min={dates.at(-1)}
+            max={dates[0]}
+            onChange={(event) => onChange({ date: event.target.value === "" ? null : event.target.value })}
+            className={DATE_INPUT}
+            aria-label="按日期过滤"
+            title="按日期过滤（只查看所选自然日）"
+          />
+          {view.date === null ? null : (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7 text-muted-foreground"
+              onClick={() => onChange({ date: null })}
+              title="清除日期，查看全部"
+              aria-label="清除日期筛选"
+            >
+              <X className="size-3.5" />
+            </Button>
+          )}
+        </div>
       )}
 
       <Button
@@ -150,7 +154,7 @@ export function SessionFilters({
         aria-label="刷新会话列表"
         title="刷新"
       >
-        <Loader2 className={refreshing ? "size-3.5 animate-spin" : "size-3.5"} />
+        <RotateCw className={cn("size-3.5", refreshing && "animate-spin")} />
       </Button>
       {action}
     </div>

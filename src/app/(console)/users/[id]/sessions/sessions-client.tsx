@@ -21,7 +21,11 @@ import {
   SessionFilters,
   type SessionView,
 } from "@/components/audit/session-filters";
-import { ConversationTable, RequestTable } from "@/components/audit/session-table";
+import {
+  ConversationTable,
+  RequestTable,
+  UngroupedHint,
+} from "@/components/audit/session-table";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -122,7 +126,7 @@ export function SessionsClient({ userId }: { userId: string }) {
             用户 ID <span className="font-mono">{userId}</span> · 提示词与返回结果 · 只读审计文件
           </p>
         </div>
-        <Button asChild size="sm" variant="outline">
+        <Button asChild size="sm">
           <Link href={`/users/${encodeURIComponent(userId)}?${backParams.toString()}`}>
             返回用户详情
           </Link>
@@ -183,6 +187,14 @@ export function SessionsClient({ userId }: { userId: string }) {
                   所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
                 </p>
               ) : null}
+
+              <UngroupedHint
+                count={
+                  view.group === "session"
+                    ? conversations.filter((row) => row.sessionKey === undefined).length
+                    : sessions.filter((row) => row.sessionKey === undefined).length
+                }
+              />
 
               {/* 累加最多 500 条：限高 + 粘性表头，否则整页会被一张表撑开 */}
               <div className="max-h-[75vh] overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">

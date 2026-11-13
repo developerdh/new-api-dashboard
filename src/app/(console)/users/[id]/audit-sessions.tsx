@@ -20,7 +20,11 @@ import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { SessionFilters, DEFAULT_SESSION_VIEW, type SessionView } from "@/components/audit/session-filters";
-import { ConversationTable, RequestTable } from "@/components/audit/session-table";
+import {
+  ConversationTable,
+  RequestTable,
+  UngroupedHint,
+} from "@/components/audit/session-table";
 import { AuditDetailDialog } from "@/components/audit/audit-detail-dialog";
 import { AuditThreadDialog } from "@/components/audit/audit-thread-dialog";
 import { Button } from "@/components/ui/button";
@@ -175,6 +179,14 @@ export function AuditSessions({
                 所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
               </p>
             ) : null}
+
+            <UngroupedHint
+              count={
+                view.group === "session"
+                  ? conversations.filter((row) => row.sessionKey === undefined).length
+                  : sessions.filter((row) => row.sessionKey === undefined).length
+              }
+            />
 
             {/* 100 条/页时整张卡会长到几屏高，限高滚动 + 粘性表头，页脚才够得着 */}
             {/* 内层 table-container 自带 overflow-x-auto，会成为 sticky 的滚动容器（且它不纵向滚动），
