@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "dist/**",
     // 独立 Go 工具链，不参与前端 lint
     "audit-proxy/**",
+    // 本地验证/截图/浏览器 profile 等临时产物，不属于源码
+    ".workbuddy/**",
   ]),
 ]);
 

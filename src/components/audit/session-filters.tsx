@@ -6,9 +6,10 @@
  * 状态用单对象 `SessionView` 传：两处入口（用户详情卡片、独立页面）共用同一份口径，
  * 任一条件变化都由调用方把 `page` 重置回 1 —— 否则会出现「筛到只剩 1 页却停在第 3 页」。
  */
-import { CalendarDays, RotateCw, X } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { AuditDatePicker } from "@/components/audit/audit-date-picker";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -29,10 +30,6 @@ export const DEFAULT_SESSION_VIEW: SessionView = {
   failedOnly: false,
   date: null,
 };
-
-/** 与全局 TimeRangePicker 的日期输入保持同一套视觉。 */
-const DATE_INPUT =
-  "h-8 rounded-md border border-input bg-background px-2 text-xs tabular-nums outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 function Chips<T extends string>({
   options,
@@ -117,32 +114,12 @@ export function SessionFilters({
       </Button>
 
       {dates.length < 2 ? null : (
-        <div className="ml-1 flex items-center gap-1">
-          <CalendarDays className="size-3.5 text-muted-foreground" aria-hidden="true" />
-          <input
-            type="date"
-            value={view.date ?? ""}
-            min={dates.at(-1)}
-            max={dates[0]}
-            onChange={(event) => onChange({ date: event.target.value === "" ? null : event.target.value })}
-            className={DATE_INPUT}
-            aria-label="按日期过滤"
-            title="按日期过滤（只查看所选自然日）"
-          />
-          {view.date === null ? null : (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="size-7 text-muted-foreground"
-              onClick={() => onChange({ date: null })}
-              title="清除日期，查看全部"
-              aria-label="清除日期筛选"
-            >
-              <X className="size-3.5" />
-            </Button>
-          )}
-        </div>
+        <AuditDatePicker
+          value={view.date}
+          onChange={(date) => onChange({ date })}
+          min={dates.at(-1) ?? dates[0]}
+          max={dates[0]}
+        />
       )}
 
       <Button

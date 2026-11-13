@@ -597,7 +597,14 @@ cursor 翻页会让该会话以更早的最后活动时间在下一页重复出�
 
 独立页的根容器吃掉剩余视口高度（`calc(100dvh - header - main padding)`），
 卡片 `flex-1 min-h-0`，表格区 `flex-1 min-h-0 overflow-auto`；筛选条与页脚都在滚动区之外，
-因此滚动表格时切换粒度/日期/加载更多不需要往回滚。表头 `sticky top-0` 需要两个前提：
+因此滚动表格时切换粒度/日期/加载更多不需要往回滚。
+
+日期控件 `components/audit/audit-date-picker.tsx` 是自己实现的轻量日历下拉（零新依赖）：
+触发器 + 绝对定位弹层 + 外部点击/Esc 关闭；月/年 select 与前后箭头切换；
+6 行以内的 7 列网格（相邻月灰显、越界禁用）；选中日主题色高亮；底部「全部日期」与可选区间。
+日期一律用 `YYYY-MM-DD` 字符串比较，不碰 Date 的本地时区。
+
+表头 `sticky top-0` 需要两个前提：
 `<table>` 用 `border-separate`（Tailwind Preflight 默认 `border-collapse` 会让 sticky 失效），
 且内层 `[data-slot=table-container]` 的 `overflow-x-auto` 要让位给外层滚动容器。
 
