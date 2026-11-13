@@ -1,16 +1,17 @@
 "use client";
 
 /**
- * 会话独立页：把用户详情里的卡片放大成一整页，改用**累加加载**。
+ * 会话独立页：新窗口打开，累加加载，整页不产生窗口滚动条。
  *
- * 为什么不在这里也做翻页：整页的高度容得下连续滚动，排查时经常要「往回看一段」
- * 而不是「跳到第 7 页」——累加更贴近这个动作；卡片那边空间小、又要保持页面骨干
- * 不被撑长，所以用翻页。两处共用 `SessionFilters` / `SessionTable`，口径不会不一致。
+ * 布局约定：
+ * - 去掉全局时间选择器与返回按钮：区间由入口 URL 带入，页面只展示「标题 + 会话列表」；
+ * - 根容器吃掉剩余视口高度，筛选条 + 表头固定在表格滚动区之外，切换粒度/日期不用往回滚；
+ * - **只有表格区滚动**（`flex-1 min-h-0 overflow-auto`），表头 `sticky top-0` 吸顶；
+ * - 页脚（已加载 / 每次条数 / 加载更多）也在滚动区之外，始终够得着。
  *
- * 实现取巧但等价：不做客户端 append，而是把 `limit` 从 20 递增（`page` 恒为 1），
+ * 累加实现：不做客户端 append，而是把 `limit` 从 20 递增（`page` 恒为 1），
  * 服务端每次返回「前 N 条」，天然去重、不会因新写入而错位。
  */
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -26,10 +27,10 @@ import {
   RequestTable,
   UngroupedHint,
 } from "@/components/audit/session-table";
-import { TimeRangePicker } from "@/components/layout/time-range-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { dayRangeOf, listDaysInRange, parseGranularity, resolveRangeFromParams } from "@/lib/time-range";
+import { formatDate } from "@/lib/format";
+import { dayRangeOf, listDaysInRange, resolveRangeFromParams } from "@/lib/time-range";
 import { useApi } from "@/lib/use-api";
 import type {
   AuditConversationRow,
@@ -44,7 +45,7 @@ const MAX_ROWS = 500;
 
 function Notice({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-center text-sm text-muted-foreground">
+    <p className="w-full rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-center text-sm text-muted-foreground">
       {children}
     </p>
   );
@@ -53,7 +54,6 @@ function Notice({ children }: { children: ReactNode }) {
 export function SessionsClient({ userId }: { userId: string }) {
   const searchParams = useSearchParams();
   const range = resolveRangeFromParams(searchParams.get("start"), searchParams.get("end"));
-  const granularity = parseGranularity(searchParams.get("granularity"));
   const displayName = searchParams.get("name") ?? "";
   const username = searchParams.get("username") ?? "";
 
@@ -102,48 +102,38 @@ export function SessionsClient({ userId }: { userId: string }) {
     setLimit(step);
   };
 
-  const backParams = new URLSearchParams({
-    start: String(range.start),
-    end: String(range.end),
-  });
-  if (granularity !== "day") backParams.set("granularity", granularity);
-  if (displayName !== "") backParams.set("name", displayName);
-  if (username !== "") backParams.set("username", username);
-
   const title = displayName !== "" ? displayName : username !== "" ? username : `用户 #${userId}`;
-  const canLoadMore =
-    !atCap && (total === null ? loaded >= limit : loaded < total);
+  const canLoadMore = !atCap && (total === null ? loaded >= limit : loaded < total);
+  const ungrouped =
+    view.group === "session"
+      ? conversations.filter((row) => row.sessionKey === undefined).length
+      : sessions.filter((row) => row.sessionKey === undefined).length;
+  const rangeLabel =
+    activeDate !== null
+      ? activeDate
+      : `${formatDate(range.start)} ~ ${formatDate(range.end - 1)}`;
 
   return (
-    <main className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">会话记录</h1>
-            <span className="text-sm text-muted-foreground">{title}</span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            用户 ID <span className="font-mono">{userId}</span> · 提示词与返回结果 · 只读审计文件
-          </p>
-        </div>
-        <Button asChild size="sm">
-          <Link href={`/users/${encodeURIComponent(userId)}?${backParams.toString()}`}>
-            返回用户详情
-          </Link>
-        </Button>
+    <div className="flex h-[calc(100dvh-var(--app-header-height)-3rem)] min-h-[360px] flex-col gap-3 overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">会话记录</h1>
+        <span className="text-sm text-muted-foreground">
+          {title} · 用户 ID <span className="font-mono">{userId}</span> · {rangeLabel}
+        </span>
       </header>
 
-      <TimeRangePicker />
-
-      <Card className="gap-3 py-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5">
-          <h2 className="text-sm font-semibold">
-            {view.group === "session" ? "会话列表" : "请求列表"}
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
+      <Card className="flex min-h-0 flex-1 flex-col gap-0 py-4">
+        {/* 筛选条在滚动区之外：表格滚到哪儿都能直接切粒度 / 日期 / 错误过滤 */}
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pb-3">
+          <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
+            <span className="text-sm font-semibold text-foreground">
+              {view.group === "session" ? "会话列表" : "请求列表"}
+            </span>
+            <span>
               {activeDate === null ? "所选区间内" : activeDate}
               {total === null ? "" : ` · 共 ${total} 个会话`}
             </span>
-          </h2>
+          </div>
           <SessionFilters
             view={{ ...view, date: activeDate }}
             onChange={changeView}
@@ -153,51 +143,55 @@ export function SessionsClient({ userId }: { userId: string }) {
           />
         </div>
 
-        <div className="px-5">
+        <div className="flex min-h-0 flex-1 flex-col px-5">
           {api.error !== undefined ? (
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-sm">
-              <p className="text-muted-foreground">{api.error.message}</p>
-              <Button type="button" size="sm" variant="outline" onClick={api.refresh}>
-                重试
-              </Button>
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <div className="flex w-full flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-sm">
+                <p className="text-muted-foreground">{api.error.message}</p>
+                <Button type="button" size="sm" variant="outline" onClick={api.refresh}>
+                  重试
+                </Button>
+              </div>
             </div>
           ) : !matched ? (
-            <div className="h-72 w-full rounded-lg skeleton-shimmer" aria-busy="true" />
+            <div className="h-full w-full rounded-lg skeleton-shimmer" aria-busy="true" />
           ) : data.available === false ? (
-            <Notice>
-              审计正文未启用（未配置 <span className="font-mono">AUDIT_DIR</span>
-              ），配置并只读挂载采集目录后即可查看。
-            </Notice>
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <Notice>
+                审计正文未启用（未配置 <span className="font-mono">AUDIT_DIR</span>
+                ），配置并只读挂载采集目录后即可查看。
+              </Notice>
+            </div>
           ) : data.lookupError !== undefined ? (
-            <Notice>
-              无法反查 token 指纹（
-              {data.lookupError === "permission_denied" ? "缺少 tokens 表读权限" : "数据库暂不可用"}
-              ），因此无法定位该用户的采集记录。
-            </Notice>
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <Notice>
+                无法反查 token 指纹（
+                {data.lookupError === "permission_denied" ? "缺少 tokens 表读权限" : "数据库暂不可用"}
+                ），因此无法定位该用户的采集记录。
+              </Notice>
+            </div>
           ) : data.fingerprintCount === 0 ? (
-            <Notice>该用户没有可用的 token 指纹，无法定位采集记录。</Notice>
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <Notice>该用户没有可用的 token 指纹，无法定位采集记录。</Notice>
+            </div>
           ) : loaded === 0 ? (
-            <Notice>
-              {activeDate === null ? "所选区间内无采集记录。" : `${activeDate} 无采集记录。`}
-            </Notice>
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <Notice>
+                {activeDate === null ? "所选区间内无采集记录。" : `${activeDate} 无采集记录。`}
+              </Notice>
+            </div>
           ) : (
             <>
               {partial ? (
-                <p className="mb-2 rounded-lg border border-dashed border-warning/50 bg-warning/10 px-3 py-1.5 text-[11px]">
+                <p className="mb-2 shrink-0 rounded-lg border border-dashed border-warning/50 bg-warning/10 px-3 py-1.5 text-[11px]">
                   所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
                 </p>
               ) : null}
 
-              <UngroupedHint
-                count={
-                  view.group === "session"
-                    ? conversations.filter((row) => row.sessionKey === undefined).length
-                    : sessions.filter((row) => row.sessionKey === undefined).length
-                }
-              />
+              <UngroupedHint count={ungrouped} />
 
-              {/* 累加最多 500 条：限高 + 粘性表头，否则整页会被一张表撑开 */}
-              <div className="max-h-[75vh] overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
+              {/* 唯一的滚动区；内层 table-container 让位给这里，粘性表头才会生效 */}
+              <div className="min-h-0 flex-1 overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
                 {view.group === "session" ? (
                   <ConversationTable
                     rows={conversations}
@@ -211,7 +205,7 @@ export function SessionsClient({ userId }: { userId: string }) {
                 )}
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span>
                   已加载 {loaded}
                   {total === null ? " 条请求" : ` / ${total} 个会话`}
@@ -276,6 +270,6 @@ export function SessionsClient({ userId }: { userId: string }) {
           setThread(null);
         }}
       />
-    </main>
+    </div>
   );
 }

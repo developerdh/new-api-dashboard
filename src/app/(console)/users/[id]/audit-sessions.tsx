@@ -126,7 +126,12 @@ export function AuditSessions({
           onRefresh={api.refresh}
           action={
             <Button asChild size="sm" variant="ghost" className="shrink-0 gap-1 whitespace-nowrap">
-              <Link href={detailHref} title="在新页面打开完整列表（累加加载）">
+              <Link
+                href={detailHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="在新窗口打开完整列表（累加加载）"
+              >
                 完整列表
                 <ExternalLink className="size-3.5" />
               </Link>
