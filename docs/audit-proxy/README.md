@@ -12,6 +12,7 @@ New API 自身不保存请求的提示词与模型返回，看板无法做内容
 | [02-design.md](02-design.md) | 架构、存储布局、索引格式、截断与容量、看板读取约定 |
 | [03-deployment.md](03-deployment.md) | 构建、systemd / Docker 部署、nginx 接入、故障行为、回滚 |
 | [04-decisions.md](04-decisions.md) | 关键取舍与否决方案的理由 |
+| [05-dashboard-plan.md](05-dashboard-plan.md) | 会话看板（列表/线程/详情）的实现规划与已核验偏差 |
 
 组件自身的构建与运行说明同时保留在 [`audit-proxy/README.md`](../../audit-proxy/README.md)，面向运维；本目录面向设计与长期维护。
 
