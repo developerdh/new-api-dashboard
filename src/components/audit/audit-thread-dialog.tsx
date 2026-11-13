@@ -13,7 +13,7 @@
  * - 开头的系统提示 / 上一轮回答归入「上下文回放」默认折叠，不与本轮输入抢占注意力；
  * - 与上一轮不连续（历史被裁剪 / 并发分支）时明确提示，而不是假装是同一串上下文。
  */
-import { ChevronRight, Loader2, RotateCw, X } from "lucide-react";
+import { ChevronRight, Loader2, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { StatusBadge, Tag } from "@/components/audit/badges";
@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { formatBytes, formatDateTimeSecond, formatNumber } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
+import { cn } from "@/lib/utils";
 import type {
   AuditBlock,
   AuditConversationRow,
@@ -301,6 +302,8 @@ export function AuditThreadDialog({
 }) {
   const sessionKey = conversation?.sessionKey;
   const [keywordInput, setKeywordInput] = useState("");
+  // 全屏是视图偏好，切换会话时保持——习惯全屏看长报文的人不会想每次都退回去
+  const [full, setFull] = useState(false);
   /**
    * 用户手动覆盖的开合状态；未覆盖时「最后一轮」默认展开。
    * 带着 `key` 存：抽屉不卸载，切换会话时旧状态必须自动失效，否则会串到新会话上。
@@ -335,7 +338,12 @@ export function AuditThreadDialog({
     >
       <DialogContent
         showCloseButton={false}
-        className="top-0 right-0 left-auto flex h-dvh max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l p-0 sm:max-w-4xl"
+        className={cn(
+          // 抽屉形态：右贴边全高；全屏时占满整个视口宽度并去掉左边框。
+          // 两种形态都必须覆盖基类的 sm:max-w-lg，否则全屏会被压回 512px。
+          "top-0 right-0 left-auto flex h-dvh max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0",
+          full ? "border-l-0 sm:max-w-none" : "border-l sm:max-w-4xl",
+        )}
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-3.5">
           <div className="min-w-0">
@@ -375,6 +383,17 @@ export function AuditThreadDialog({
               placeholder="在已展开的轮次中搜索"
               className="h-7 w-40 rounded-md border border-input bg-transparent px-2 text-[11px] outline-none focus-visible:border-ring"
             />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={() => setFull((value) => !value)}
+              aria-label={full ? "退出全屏" : "全屏显示"}
+              title={full ? "退出全屏" : "全屏显示（查看长报文更方便）"}
+            >
+              {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
             <Button
               type="button"
               size="icon"

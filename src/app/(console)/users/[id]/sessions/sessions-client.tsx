@@ -29,7 +29,6 @@ import {
 } from "@/components/audit/session-table";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/format";
 import { dayRangeOf, listDaysInRange, resolveRangeFromParams } from "@/lib/time-range";
 import { useApi } from "@/lib/use-api";
 import type {
@@ -102,24 +101,19 @@ export function SessionsClient({ userId }: { userId: string }) {
     setLimit(step);
   };
 
-  const title = displayName !== "" ? displayName : username !== "" ? username : `用户 #${userId}`;
+  /** 标题展示「昵称 用户名」；都没有时回退到编号（URL 没带身份参数的直达场景）。 */
+  const title = [displayName, username].filter(Boolean).join(" ") || `用户 #${userId}`;
   const canLoadMore = !atCap && (total === null ? loaded >= limit : loaded < total);
   const ungrouped =
     view.group === "session"
       ? conversations.filter((row) => row.sessionKey === undefined).length
       : sessions.filter((row) => row.sessionKey === undefined).length;
-  const rangeLabel =
-    activeDate !== null
-      ? activeDate
-      : `${formatDate(range.start)} ~ ${formatDate(range.end - 1)}`;
 
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-height)-3rem)] min-h-[360px] flex-col gap-3 overflow-hidden">
       <header className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">会话记录</h1>
-        <span className="text-sm text-muted-foreground">
-          {title} · 用户 ID <span className="font-mono">{userId}</span> · {rangeLabel}
-        </span>
+        <span className="text-sm text-muted-foreground">{title}</span>
       </header>
 
       <Card className="flex min-h-0 flex-1 flex-col gap-0 py-4">
