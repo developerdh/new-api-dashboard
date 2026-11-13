@@ -24,7 +24,9 @@ const START = Math.floor(Date.parse(`${SAMPLE_DATE}T00:00:00+08:00`) / 1000);
 const END = Math.floor(Date.parse("2026-11-14T00:00:00+08:00") / 1000);
 
 describe.skipIf(!HAS_SAMPLE)("真实样本：列表", () => {
-  it("只归属该用户：9 条命中、1 条未知指纹被排除", async () => {
+  // 样本目录是本地运行时产物（verify.sh / 联调会继续追加），
+  // 因此断言写"不变量"而不是固定条数，否则每加一次请求测试就红。
+  it("只归属该用户：命中数不少于已知样本，未知指纹被排除", async () => {
     const result = await scanSessions({
       dir: SAMPLE_DIR,
       start: START,
@@ -32,19 +34,22 @@ describe.skipIf(!HAS_SAMPLE)("真实样本：列表", () => {
       maxDays: 31,
       fingerprints: new Set([FP_USER_1]),
       knownFingerprints: new Set([FP_USER_1]),
-      limit: 50,
+      limit: 200,
     });
-    expect(result.rows).toHaveLength(9);
-    expect(result.unmatched).toBe(1);
-    // 倒序：最新一条是 13:39:02.277
-    expect(result.rows[0]?.traceId).toBe("e9ed66315a1567041f60825795454501");
+    expect(result.rows.length).toBeGreaterThanOrEqual(9);
+    expect(result.unmatched).toBeGreaterThanOrEqual(1);
     expect(result.rows.every((row) => row.fp === FP_USER_1)).toBe(true);
+    // 已知的一条仍在样本里
+    expect(result.rows.map((row) => row.traceId)).toContain("e9ed66315a1567041f60825795454501");
+    // 倒序：时间单调不增
+    const epochs = result.rows.map((row) => row.startedAtEpoch);
+    expect([...epochs].sort((a, b) => b - a)).toEqual(epochs);
   });
 
   it("索引容错：坏行不影响其余条目", async () => {
     const day = await readIndexDay(SAMPLE_DIR, SAMPLE_DATE);
     expect(day.exists).toBe(true);
-    expect(day.entries).toHaveLength(10);
+    expect(day.entries.length).toBeGreaterThanOrEqual(10);
     expect(day.badLines).toBe(0);
   });
 });
@@ -99,6 +104,8 @@ describe.skipIf(!HAS_SAMPLE)("真实样本：详情归一化", () => {
       promptTokens: 14,
       completionTokens: 8,
       totalTokens: 22,
+      // 测试机样本的 usage 块带 prompt_tokens_details.cached_tokens = 0
+      cachedTokens: 0,
     });
   });
 

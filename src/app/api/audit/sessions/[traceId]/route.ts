@@ -12,11 +12,12 @@ import { connection } from "next/server";
 
 import { AuditAmbiguousError, auditError, toAuditErrorResponse } from "@/server/audit/errors";
 import { entryEpochSeconds, readIndexDay } from "@/server/audit/index";
-import { normalizeAudit } from "@/server/audit/normalize";
+import { normalizeAudit, normalizeRequestMessages } from "@/server/audit/normalize";
 import { TRACE_PATTERN, auditDir, isAuditAvailable } from "@/server/audit/paths";
 import { parseDetailQuery } from "@/server/audit/query";
 import { AuditBlobMissingError, auditRawPreviewBytes, readAuditBlob } from "@/server/audit/reader";
-import type { AuditSessionDetail } from "@/server/audit/types";
+import { computeThreadDelta } from "@/server/audit/thread";
+import type { AuditBlock, AuditSessionDetail, AuditThreadDelta } from "@/server/audit/types";
 import { ok } from "@/server/http";
 import { fingerprintsOfUser, loadTokenFingerprints } from "@/server/queries/audit-tokens";
 
@@ -25,6 +26,51 @@ function preview(text: string, maxBytes: number): { text: string; truncated: boo
   const buffer = Buffer.from(text, "utf8");
   if (buffer.length <= maxBytes) return { text, truncated: false };
   return { text: buffer.subarray(0, maxBytes).toString("utf8"), truncated: true };
+}
+
+/**
+ * 读上一轮请求的消息列表（线程增量用）。
+ *
+ * 匹配条件必须同时满足 `trace + 指纹 + 会话键`：
+ * 只按 trace 找的话，客户端复用 `X-Request-Id` 时可能命中另一条会话的请求，
+ * 差分结果会串台。找不到 / 读不到正文时返回空，由调用方标注原因降级。
+ */
+async function resolvePrevMessages(input: {
+  dir: string;
+  prev: { traceId: string; date: string };
+  current: { u: string; k?: string };
+  fingerprints: ReadonlySet<string>;
+}): Promise<{ messages?: AuditBlock[]; parseFailed: boolean }> {
+  const day = await readIndexDay(input.dir, input.prev.date);
+  const entry = day.entries.find(
+    (item) =>
+      item.t === input.prev.traceId && item.u === input.current.u && item.k === input.current.k,
+  );
+  if (entry === undefined || !input.fingerprints.has(entry.u)) {
+    return { parseFailed: false };
+  }
+
+  let blob: Awaited<ReturnType<typeof readAuditBlob>>;
+  try {
+    blob = await readAuditBlob({
+      dir: input.dir,
+      date: input.prev.date,
+      fp: entry.u,
+      trace: entry.t,
+      kind: "req",
+      gzip: entry.qz,
+    });
+  } catch {
+    return { parseFailed: false }; // 已被清理：降级为「展示全部上下文」
+  }
+
+  const parsed = normalizeRequestMessages({
+    entry,
+    requestText: blob.text,
+    requestCapped: blob.capped,
+  });
+  if (parsed.parseError !== undefined) return { parseFailed: true };
+  return { messages: parsed.messages, parseFailed: false };
 }
 
 export async function GET(
@@ -105,6 +151,23 @@ export async function GET(
     const rawMax = auditRawPreviewBytes();
     const rawRequest = preview(requestBlob.text, rawMax);
     const rawResponse = preview(responseBlob.text, rawMax);
+
+    let delta: AuditThreadDelta | undefined;
+    if (query.prev !== undefined) {
+      const prev = await resolvePrevMessages({
+        dir,
+        prev: query.prev,
+        current: { u: entry.u, ...(entry.k === undefined ? {} : { k: entry.k }) },
+        fingerprints,
+      });
+      delta = computeThreadDelta({
+        prevTraceId: query.prev.traceId,
+        ...(prev.messages === undefined ? {} : { prevMessages: prev.messages }),
+        currentMessages: envelope.request.messages,
+        prevParseFailed: prev.parseFailed,
+      });
+    }
+
     const data: AuditSessionDetail = {
       envelope,
       raw: {
@@ -113,6 +176,7 @@ export async function GET(
         requestTruncated: requestBlob.capped || rawRequest.truncated,
         responseTruncated: responseBlob.capped || rawResponse.truncated,
       },
+      ...(delta === undefined ? {} : { delta }),
     };
 
     const epoch = entryEpochSeconds(entry);

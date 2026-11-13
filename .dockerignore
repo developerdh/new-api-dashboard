@@ -9,6 +9,7 @@ dist
 coverage
 
 # 版本库与本地配置
+.workbuddy
 .git
 .gitignore
 .gitattributes
