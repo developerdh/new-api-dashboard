@@ -8,7 +8,6 @@
  * - 交叉固定 Top20 用户 × Top10 模型 + others（cross 端点，本页只消费）。
  */
 import type { EChartsOption } from "echarts";
-import { Download } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -239,22 +238,12 @@ export function ModelsClient() {
               onChange={setRankingMetric}
               label="排行统计维度"
             />
-            <Button
-              asChild
-              size="icon"
-              variant="ghost"
-              className="size-7 text-muted-foreground"
-            >
-              <a
-                href={`/api/export/csv?dataset=modelsRanking&start=${range.start}&end=${range.end}&limit=${RANKING_FETCH_LIMIT}`}
-                download
-                title="导出 CSV"
-                aria-label="导出模型排行 CSV"
-              >
-                <Download className="size-3.5" />
-              </a>
-            </Button>
-            <ChartExportButton exportName="models-ranking" title="模型排行" />
+            <ChartExportButton
+              exportName="models-ranking"
+              title="模型排行"
+              csvHref={`/api/export/csv?dataset=modelsRanking&start=${range.start}&end=${range.end}&limit=${RANKING_FETCH_LIMIT}`}
+              csvLabel="排行明细"
+            />
           </div>
         </div>
         <div className="px-5">

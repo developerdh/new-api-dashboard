@@ -9,7 +9,6 @@
  * - 用户排行弹窗为受控 Dialog，「查看全部」与指标卡里的活跃用户数共用同一入口；
  * - 热力图固定近半年，不随全局区间变化。
  */
-import { Download } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
@@ -247,22 +246,12 @@ export function OverviewClient() {
                   onChange={setRankingMetric}
                   label="排行统计维度"
                 />
-                <Button
-                  asChild
-                  size="icon"
-                  variant="ghost"
-                  className="size-7 text-muted-foreground"
-                >
-                  <a
-                    href={`/api/export/csv?dataset=usersRanking&start=${range.start}&end=${range.end}&limit=100`}
-                    download
-                    title="导出 CSV"
-                    aria-label="导出用户排行 CSV"
-                  >
-                    <Download className="size-3.5" />
-                  </a>
-                </Button>
-                <ChartExportButton exportName="users-ranking" title="用户消耗排行" />
+                <ChartExportButton
+                  exportName="users-ranking"
+                  title="用户消耗排行"
+                  csvHref={`/api/export/csv?dataset=usersRanking&start=${range.start}&end=${range.end}&limit=100`}
+                  csvLabel="排行明细"
+                />
                 <Button
                   type="button"
                   size="sm"
