@@ -1,0 +1,43 @@
+# audit-proxy 独立 compose（容器化自部署）
+#
+# 用法：
+#   cp audit-proxy.env.example .env
+#   docker compose -f docker-compose.example.yml up -d --build
+#
+# 若与仓库根目录的看板 compose 共用一张网络，把本文件的服务定义直接并入根
+# docker-compose.yml，并让两个服务挂同一个 bind mount：
+#   看板侧  ./data/audit:/app/data/audit:ro
+#   代理侧  ./data/audit:/app/data/audit
+
+services:
+  audit-proxy:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-local}
+    image: new-api-audit-proxy:local
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Shanghai
+      # 上游是宿主机上的 new-api：Linux 需 host-gateway 才能解析该名字
+      UPSTREAM: ${UPSTREAM:-http://host.docker.internal:3000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # 仅绑定回环：代理不对外，入口仍是 nginx
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./data/audit:/app/data/audit
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/audit-proxy", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

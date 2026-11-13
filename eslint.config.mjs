@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // 发布包产物（含编译后的服务端 chunk，非源码）
     "dist/**",
+    // 独立 Go 工具链，不参与前端 lint
+    "audit-proxy/**",
   ]),
 ]);
 

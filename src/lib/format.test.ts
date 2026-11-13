@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   QUOTA_PER_USD,
+  formatBytes,
   formatCompactNumber,
   formatDate,
   formatDateRange,
   formatDateTime,
+  formatDateTimeSecond,
   formatDelta,
   formatNumber,
   formatPercent,
@@ -52,8 +54,16 @@ describe("日期格式化（Asia/Shanghai）", () => {
   it("日期/日期时间/input 值", () => {
     expect(formatDate(T_DAY)).toBe("2026/11/10");
     expect(formatDateTime(T_DAY)).toBe("2026/11/10 00:00");
+    expect(formatDateTimeSecond(T_DAY + 62)).toBe("2026/11/10 00:01:02");
     expect(toDateInputValue(T_DAY)).toBe("2026-11-10");
     expect(formatDate(Number.NaN)).toBe("—");
+  });
+
+  it("字节数按 1024 进制格式化", () => {
+    expect(formatBytes(913)).toBe("913 B");
+    expect(formatBytes(1243)).toBe("1.2 KB");
+    expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MB");
+    expect(formatBytes(-1)).toBe("—");
   });
 
   it("区间：同日折叠为一天，跨日显示 ~", () => {

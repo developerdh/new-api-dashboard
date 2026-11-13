@@ -30,6 +30,17 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   hourCycle: "h23",
 });
 
+const dateTimeSecondFormatter = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 /** `<input type="date">` 需要 `YYYY-MM-DD`（en-CA 输出即该格式）。 */
 const dateInputFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
@@ -64,6 +75,15 @@ export function formatMillions(value: number): string {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+/** 字节数（1024 进制，保留 1 位小数）：913 → 913 B，1243 → 1.2 KB。 */
+export function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "—";
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 /** 比例 → 百分比字符串（0.1234 → 12.3%）。 */
 export function formatPercent(value: number, digits = 1): string {
   if (!Number.isFinite(value)) return "—";
@@ -80,6 +100,15 @@ export function formatDate(epochSeconds: number): string {
 export function formatDateTime(epochSeconds: number): string {
   if (!Number.isFinite(epochSeconds)) return "—";
   return dateTimeFormatter.format(new Date(epochSeconds * 1000));
+}
+
+/**
+ * Unix 秒 → 东八区 `YYYY-MM-DD HH:mm:ss`。
+ * 审计列表按秒区分请求（同一分钟内可能有多条），故不能用分钟精度。
+ */
+export function formatDateTimeSecond(epochSeconds: number): string {
+  if (!Number.isFinite(epochSeconds)) return "—";
+  return dateTimeSecondFormatter.format(new Date(epochSeconds * 1000));
 }
 
 /** Unix 秒 → 东八区 `YYYY-MM-DD`（供 `<input type="date">` 使用）。 */
