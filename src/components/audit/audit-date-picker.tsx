@@ -79,7 +79,14 @@ export function buildMonth(year: number, month: number): Cell[] {
 const SELECT_CLASS =
   "flex h-7 items-center justify-between gap-1 rounded-md border border-input bg-background px-1.5 text-xs shadow-xs outline-none transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30";
 
-/** 月/年选择：Radix 下拉，样式与面板统一（原生 select 的系统样式与整体不搭）。 */
+/**
+ * 月/年选择：Radix 下拉，样式与面板统一（原生 select 的系统样式与整体不搭）。
+ *
+ * 必须非模态（modal=false）：模态下拉会把 body 设为 pointer-events:none、只在
+ * 自己的层分支里恢复，于是点相邻的另一个下拉触发器时 pointerdown 会"穿透"到
+ * 面板之外，被日历的外点关闭逻辑命中 —— 整个日历被关掉。非模态下外部元素保持
+ * 可点击：月菜单先被关闭，年份菜单正常打开，日历不动。
+ */
 function MonthYearSelect({
   value,
   options,
@@ -95,7 +102,7 @@ function MonthYearSelect({
 }) {
   const current = options.find((option) => option.value === value);
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"

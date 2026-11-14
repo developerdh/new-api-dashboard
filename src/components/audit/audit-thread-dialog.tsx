@@ -23,6 +23,7 @@ import {
   type BlockFilter,
 } from "@/components/audit/audit-message-filters";
 import { StatusBadge, Tag } from "@/components/audit/badges";
+import { BytePair } from "@/components/audit/byte-pair";
 import { MessageBlock } from "@/components/audit/message-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -302,9 +303,10 @@ function TurnCard({
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {turn.durationMs} ms
         </span>
-        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-          {formatBytes(turn.requestBytes)} → {formatBytes(turn.responseBytes)}
-        </span>
+        <BytePair
+          request={formatBytes(turn.requestBytes)}
+          response={formatBytes(turn.responseBytes)}
+        />
       </button>
       {open ? <TurnBody userId={userId} turn={turn} filter={filter} highlight={highlight} /> : null}
     </div>

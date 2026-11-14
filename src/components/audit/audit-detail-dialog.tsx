@@ -13,6 +13,7 @@ import { Loader2, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { StatusBadge, Tag } from "@/components/audit/badges";
+import { BytePair } from "@/components/audit/byte-pair";
 import {
   blockMatches,
   isDefaultFilter,
@@ -231,27 +232,31 @@ export function AuditDetailDialog({
               )}
             </div>
           </div>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            onClick={() => setFull((value) => !value)}
-            aria-label={full ? "退出全屏" : "全屏显示"}
-            title={full ? "退出全屏" : "全屏显示（查看长报文更方便）"}
-          >
-            {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <X className="size-4" />
-          </Button>
+          {/* 全屏与关闭必须包在同一个 group 里：header 是 justify-between，
+              两个独立按钮会被拆到两端，全屏态下中间空一大截 */}
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={() => setFull((value) => !value)}
+              aria-label={full ? "退出全屏" : "全屏显示"}
+              title={full ? "退出全屏" : "全屏显示（查看长报文更方便）"}
+            >
+              {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={onClose}
+              aria-label="关闭"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
         </div>
 
         {row === null ? null : (
@@ -263,9 +268,10 @@ export function AuditDetailDialog({
               <span>·</span>
               <span>{row.protocol}</span>
               <span>·</span>
-              <span className="tabular-nums">
-                {formatBytes(row.requestBytes)} → {formatBytes(row.responseBytes)}
-              </span>
+              <BytePair
+                request={formatBytes(row.requestBytes)}
+                response={formatBytes(row.responseBytes)}
+              />
               <span>·</span>
               <span className="tabular-nums">
                 {row.durationMs} ms
