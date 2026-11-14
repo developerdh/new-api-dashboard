@@ -1,10 +1,8 @@
 "use client";
 
 /**
- * 请求/响应字节数的双胶囊：颜色区分方向（蓝=请求、绿=响应）、固定宽度对齐。
- *
- * 为什么不用 `X → Y`：箭头文本在表格里宽窄不一，列会显得参差；
- * 两个定宽胶囊上下对齐，纵向扫一眼就能比较大小。
+ * 请求/响应字节双胶囊：仅在详情抽屉的兜底场景使用（正文缺失 / 非对话协议
+ * 没有 usage 时退回字节展示）。列表一律用 TokenPair。
  */
 import { cn } from "@/lib/utils";
 
@@ -31,16 +29,6 @@ export function BytePair({
       >
         {response}
       </span>
-    </span>
-  );
-}
-
-/** 表头用：与 BytePair 同宽的两列小标题，颜色与胶囊对应。 */
-export function BytePairHead({ className }: { className?: string }) {
-  return (
-    <span className={cn("inline-flex items-center justify-end gap-1", className)}>
-      <span className="w-[4.75rem] text-center text-info">请求</span>
-      <span className="w-[4.75rem] text-center text-success">响应</span>
     </span>
   );
 }
