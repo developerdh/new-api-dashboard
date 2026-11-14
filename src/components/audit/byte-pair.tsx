@@ -9,7 +9,7 @@
 import { cn } from "@/lib/utils";
 
 const CAPSULE =
-  "inline-flex h-[18px] items-center justify-end rounded-md px-1.5 text-[11px] tabular-nums whitespace-nowrap";
+  "inline-flex h-[18px] items-center justify-center rounded-md px-1.5 text-[11px] tabular-nums whitespace-nowrap";
 
 export function BytePair({
   request,
@@ -39,8 +39,8 @@ export function BytePair({
 export function BytePairHead({ className }: { className?: string }) {
   return (
     <span className={cn("inline-flex items-center justify-end gap-1", className)}>
-      <span className="w-[4.75rem] text-right text-info">请求</span>
-      <span className="w-[4.75rem] text-right text-success">响应</span>
+      <span className="w-[4.75rem] text-center text-info">请求</span>
+      <span className="w-[4.75rem] text-center text-success">响应</span>
     </span>
   );
 }
