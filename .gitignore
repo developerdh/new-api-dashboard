@@ -44,8 +44,9 @@ data/snapshots/
 # 本地任务看板（不入库）
 docs/tasks/
 
-# 审计代理：本地运行时产物（正式部署使用系统目录或 bind mount）
-audit-proxy/bin/
-audit-proxy/dist/
-audit-proxy/data/
-data/audit/
+# 前置代理：本地运行时产物（正式部署使用系统目录或 bind mount）
+dashcam/bin/
+dashcam/dist/
+dashcam/data/
+data/dashcam/
+/data

@@ -24,16 +24,16 @@ services:
     environment:
       TZ: Asia/Shanghai
       DASHBOARD_BASE_URL: http://127.0.0.1:3088
-      # 审计正文目录固定为容器内路径（.env 里的 AUDIT_DIR 面向本地开发，可能写成宿主机路径）
-      AUDIT_DIR: /app/data/audit
+      # 监控记录目录固定为容器内路径（.env 里的 DASHCAM_DIR 面向本地开发，可能写成宿主机路径）
+      DASHCAM_DIR: /app/data/dashcam
     ports:
       # 宿主与容器同为 3088
       - "3088:3088"
     volumes:
       # 快照产物持久化（不入库；起由受保护路由读取）
       - ./data/snapshots:/app/data/snapshots
-      # 审计正文只读挂载（与 audit-proxy 的写侧共用同一目录）
-      - ./data/audit:/app/data/audit:ro
+      # 监控记录只读挂载（与 new-api-dashcam 的写侧共用同一目录）
+      - ./data/dashcam:/app/data/dashcam:ro
     restart: unless-stopped
     healthcheck:
       test:

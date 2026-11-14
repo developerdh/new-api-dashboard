@@ -40,8 +40,8 @@ public/snapshots
 # 快照产物（运行时卷挂载）
 data/snapshots
 
-# 审计代理：独立 Go 工具链，构建上下文必须是 audit-proxy/ 目录
-audit-proxy
+# 前置代理：独立 Go 工具链，构建上下文必须是 dashcam/ 目录
+dashcam
 
-# 审计产物（运行时卷挂载）
-data/audit
+# 监控产物（运行时卷挂载）
+data/dashcam

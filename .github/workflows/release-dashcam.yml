@@ -1,0 +1,88 @@
+name: Release dashcam
+
+# 独立于看板的发布流水线：tag 前缀区分，产物是非容器的静态二进制包。
+# 触发：git tag dashcam-v0.1.0 && git push origin dashcam-v0.1.0
+
+on:
+  push:
+    tags:
+      - "dashcam-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（不含 dashcam- 前缀，如 v0.1.0）"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: dashcam/go.mod
+          cache-dependency-path: dashcam/go.mod
+
+      - name: 解析版本
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VALUE="${{ github.event.inputs.version }}"
+          else
+            VALUE="${GITHUB_REF_NAME#dashcam-}"
+          fi
+          # 版本须以 v 开头，保证产物命名与 tag（dashcam-v*）口径一致
+          case "$VALUE" in v*) ;; *) echo "::error::版本号须以 v 开头，如 v0.1.0"; exit 1;; esac
+          echo "value=$VALUE" >> "$GITHUB_OUTPUT"
+
+      - name: 静态检查
+        working-directory: dashcam
+        run: |
+          go vet ./...
+          test -z "$(gofmt -l .)" || { echo "::error::存在未格式化文件"; gofmt -l .; exit 1; }
+
+      - name: 交叉编译并打包
+        working-directory: dashcam
+        env:
+          VERSION: ${{ steps.v.outputs.value }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            pkg="new-api-dashcam_${VERSION}_linux_${arch}"
+            mkdir -p "dist/${pkg}"
+            CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -trimpath \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "dist/${pkg}/new-api-dashcam" .
+            cp new-api-dashcam.service dashcam.env.example README.md "dist/${pkg}/"
+            chmod 0755 "dist/${pkg}/new-api-dashcam"
+            tar -C dist -czf "dist/${pkg}.tar.gz" "${pkg}"
+            rm -rf "dist/${pkg}"
+          done
+          sha256sum dist/*.tar.gz > dist/SHA256SUMS
+          cat dist/SHA256SUMS
+
+      # 产物必须能在干净 Linux 上直接执行（静态链接、无 glibc 依赖）
+      - name: 冒烟验证
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/smoke && tar -xzf dashcam/dist/*_linux_amd64.tar.gz -C /tmp/smoke
+          BIN="$(find /tmp/smoke -name new-api-dashcam -type f)"
+          "$BIN" -version
+          file "$BIN" | tee /dev/stderr | grep -q "statically linked"
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 手动触发时 ref_name 是分支名，不能直接当 tag；tag 推送时由版本反推的结果恰等于 ref_name
+          tag_name: dashcam-${{ steps.v.outputs.value }}
+          name: dashcam ${{ steps.v.outputs.value }}
+          files: |
+            dashcam/dist/*.tar.gz
+            dashcam/dist/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: true
