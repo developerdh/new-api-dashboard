@@ -18,6 +18,7 @@ import { useSearchParams } from "next/navigation";
 
 import { DashcamDetailDialog } from "@/components/dashcam/dashcam-detail-dialog";
 import { DashcamThreadDialog } from "@/components/dashcam/dashcam-thread-dialog";
+import { SamplingNotice } from "@/components/dashcam/sampling-notice";
 import {
   DEFAULT_SESSION_VIEW,
   SessionFilters,
@@ -182,6 +183,9 @@ export function SessionsClient({ userId }: { userId: string }) {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-5">
+          {data !== undefined && data.available === true && data.sampling !== undefined ? (
+            <SamplingNotice sampling={data.sampling} />
+          ) : null}
           {api.error !== undefined ? (
             <div className="flex min-h-0 flex-1 items-center justify-center">
               <div className="flex w-full flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-sm">

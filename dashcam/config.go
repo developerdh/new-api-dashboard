@@ -20,6 +20,11 @@ type config struct {
 	MaxResponse int64
 	GzipOver    int64
 
+	// 按调用方指纹整体抽样（D-P2）：sha256(指纹) % SampleModulus < SampleKeep 才采集，
+	// 被抽中的指纹全量记录，未抽中的完全不落盘。SampleModulus=0（默认）= 全量记录。
+	SampleModulus int64
+	SampleKeep    int64
+
 	// 上游响应头等待上限。不含 body 读取：流式响应可能持续十分钟。
 	HeaderTimeout time.Duration
 	// 单次落盘写入的缓冲区大小，决定内存上界（与 body 大小无关）。
@@ -56,6 +61,17 @@ func loadConfig() (config, error) {
 	}
 	if cfg.MaxRequest <= 0 || cfg.MaxResponse <= 0 {
 		return cfg, fmt.Errorf("MAX_REQUEST_BYTES / MAX_RESPONSE_BYTES 必须为正数")
+	}
+
+	cfg.SampleModulus = envInt64("SAMPLE_MODULUS", 0)
+	cfg.SampleKeep = envInt64("SAMPLE_KEEP", 1)
+	// 与 CAPTURE_PATHS 为空同款校验风格：启用时参数错 = 整体漏采，宁可启动失败。
+	if cfg.SampleModulus < 0 {
+		return cfg, fmt.Errorf("SAMPLE_MODULUS 必须为非负整数（0 = 关闭抽样）")
+	}
+	if cfg.SampleModulus > 0 && (cfg.SampleKeep < 1 || cfg.SampleKeep > cfg.SampleModulus) {
+		return cfg, fmt.Errorf("SAMPLE_KEEP 必须在 1–SAMPLE_MODULUS 之间（当前 K=%d N=%d）",
+			cfg.SampleKeep, cfg.SampleModulus)
 	}
 	return cfg, nil
 }

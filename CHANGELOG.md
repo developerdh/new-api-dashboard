@@ -10,6 +10,10 @@
   早于保留期（`DASHCAM_RETENTION_DAYS`，默认 90 天、`0` 禁用）的 blobs 与同寿命日索引，并回收
   `.tmp` 残留；默认 dry-run，显式 `--confirm` 才删除。调度示例（systemd timer / cron）见
   `docs/dashcam/03-deployment.md` §7。
+- **按调用方指纹比例抽样（D-P2）**：代理新增 `SAMPLE_MODULUS` / `SAMPLE_KEEP`
+  （`sha256(指纹) % N < K` 判定，默认关闭 = 全量记录），被抽中指纹全量记录、未抽中不落盘；
+  启动时把抽样状态写入 `DASHCAM_DIR/meta.json`，看板会话列表据此展示统一口径提示
+  （未抽中的调用方不产生任何记录，总量以 New API 主库为准）。
 - **提示词与响应采集（new-api-dashcam）**：独立 Go 前置代理，把白名单对话接口的请求与响应原样落盘
   （按天 NDJSON 索引 + blob 文件），转发零第三方依赖，仅丢采集不丢调用。
   - 索引含模型、状态、耗时、截断位、会话键哈希（`k`）与 token 用量（`pt`/`ct`/`cc`/`cw`，

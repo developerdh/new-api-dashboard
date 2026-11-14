@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -117,10 +118,9 @@ type record struct {
 	errMsg     string
 }
 
-func (s *sink) begin(r *http.Request) *record {
+func (s *sink) begin(r *http.Request, token string) *record {
 	now := time.Now()
 	trace := pickTrace(r)
-	token := tokenFingerprint(r.Header.Get("Authorization"))
 	dir := filepath.Join(s.cfg.DashcamDir, "blobs", now.Format("2006-01-02"), token)
 	if err := s.ensureDir(dir); err != nil {
 		logEvent("warn", "capture_dir_failed", map[string]any{"trace": trace, "error": err.Error()})
@@ -456,6 +456,43 @@ func tokenFingerprint(auth string) string {
 	}
 	sum := sha256.Sum256([]byte(auth))
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+// sampled 按调用方指纹判定是否采集（D-P2）：sha256(指纹) % N < K。
+// 无状态判定——同指纹恒定、重启不抖动；成本为一次哈希取模，纳秒级。
+// N=0（关闭）恒为 true，等于未开启抽样时的全量记录行为。
+// 指纹取哈希前 8 字节按大端序取模：截断不破坏均匀性，避免引入大数运算；
+// 全程无符号——有符号转换会把高位哈希变负数，而 Go 的负数取模恒小于 K，会误抽中一半指纹。
+func (c config) sampled(fp string) bool {
+	if c.SampleModulus <= 0 {
+		return true
+	}
+	sum := sha256.Sum256([]byte(fp))
+	return binary.BigEndian.Uint64(sum[:8])%uint64(c.SampleModulus) < uint64(c.SampleKeep)
+}
+
+// samplingMeta 是 DASHCAM_DIR/meta.json 的内容：代理启动时写入当前抽样状态，
+// 看板只读展示统一口径提示，避免看板/代理两处配置漂移。
+type samplingMeta struct {
+	SamplingEnabled bool  `json:"sampling_enabled"`
+	SampleModulus   int64 `json:"sample_modulus"`
+	SampleKeep      int64 `json:"sample_keep"`
+}
+
+// writeSamplingMeta 每次启动覆盖写；失败只记日志——文件缺失时看板视为未开启
+// （兼容旧代理），不影响转发与采集。
+func writeSamplingMeta(cfg config) error {
+	meta := samplingMeta{
+		SamplingEnabled: cfg.SampleModulus > 0,
+		SampleModulus:   cfg.SampleModulus,
+		SampleKeep:      cfg.SampleKeep,
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(cfg.DashcamDir, "meta.json")
+	return os.WriteFile(path, append(data, '\n'), 0o640)
 }
 
 func randomHex(n int) string {

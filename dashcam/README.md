@@ -84,6 +84,8 @@ token 提取的解析口径与看板侧（`src/server/dashcam/normalize.ts`）�
 | `MAX_REQUEST_BYTES` | `134217728`（128 MiB） | 请求落盘上限，超出截断并置 `tr` 位 |
 | `MAX_RESPONSE_BYTES` | `134217728` | 响应落盘上限 |
 | `GZIP_THRESHOLD` | `65536` | 超过则压缩；`0` 关闭 |
+| `SAMPLE_MODULUS` | `0` | 按调用方指纹整体抽样模数 N；`0` = 全量记录（关闭） |
+| `SAMPLE_KEEP` | `1` | 抽样保留数 K，启用时须 `1 ≤ K ≤ N` |
 | `UPSTREAM_HEADER_TIMEOUT` | `300s` | 等待上游响应头，不含 body |
 
 内存占用与 body 大小无关：请求/响应都是边转发边写盘，常驻约为每请求 64 KiB 缓冲。

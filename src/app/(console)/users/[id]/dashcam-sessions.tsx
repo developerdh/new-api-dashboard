@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { SessionFilters, DEFAULT_SESSION_VIEW, type SessionView } from "@/components/dashcam/session-filters";
+import { SamplingNotice } from "@/components/dashcam/sampling-notice";
 import {
   ConversationTable,
   RequestTable,
@@ -141,6 +142,9 @@ export function DashcamSessions({
       </div>
 
       <div className="px-5">
+        {data !== undefined && data.available === true && data.sampling !== undefined ? (
+          <SamplingNotice sampling={data.sampling} />
+        ) : null}
         {api.error !== undefined ? (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-sm">
             <p className="text-muted-foreground">{api.error.message}</p>

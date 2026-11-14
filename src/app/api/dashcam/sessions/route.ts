@@ -19,6 +19,7 @@ import { connection } from "next/server";
 
 import { toDashcamErrorResponse } from "@/server/dashcam/errors";
 import { scanConversations, scanSessions } from "@/server/dashcam/index";
+import { readSamplingMeta } from "@/server/dashcam/meta";
 import { dashcamDir, dashcamMaxWindowDays, isDashcamAvailable } from "@/server/dashcam/paths";
 import { parseSessionsQuery } from "@/server/dashcam/query";
 import { attachUsage, hydrateSessionUsages } from "@/server/dashcam/usage";
@@ -70,6 +71,14 @@ export async function GET(request: Request): Promise<Response> {
       );
     }
 
+    // 抽样状态（D-P2）：代理写入的 meta.json 是唯一权威来源；仅开启时随响应返回，
+    // 界面据此展示统一口径提示。缺失/损坏视为未开启（兼容旧代理）。
+    const samplingMeta = await readSamplingMeta(dir);
+    const samplingPart =
+      samplingMeta?.enabled === true
+        ? { sampling: { modulus: samplingMeta.modulus, keep: samplingMeta.keep } }
+        : {};
+
     const tokens = await loadTokenFingerprints();
     const fingerprints = fingerprintsOfUser(tokens, query.userId);
 
@@ -79,6 +88,7 @@ export async function GET(request: Request): Promise<Response> {
           ...emptyPage({ available: true, grouped, pageSize: query.limit, ...datePart }),
           fingerprintCount: fingerprints.size,
           ...(tokens.ok ? {} : { lookupError: tokens.error }),
+          ...samplingPart,
         },
         meta,
       );
@@ -116,6 +126,7 @@ export async function GET(request: Request): Promise<Response> {
         scannedDates: result.scannedDates,
         fingerprintCount: fingerprints.size,
         ...(result.unmatched > 0 ? { unmatched: result.unmatched } : {}),
+        ...samplingPart,
         ...datePart,
       };
       return ok(data, meta);
@@ -138,6 +149,7 @@ export async function GET(request: Request): Promise<Response> {
       scannedDates: scan.scannedDates,
       fingerprintCount: fingerprints.size,
       ...(scan.unmatched > 0 ? { unmatched: scan.unmatched } : {}),
+      ...samplingPart,
       ...datePart,
     };
     return ok(data, meta);

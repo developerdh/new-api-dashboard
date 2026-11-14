@@ -231,6 +231,12 @@ export interface DashcamSessionList {
   unmatched?: number;
   /** 生效的单日过滤（`YYYY-MM-DD`），未按时缺省。 */
   date?: string;
+  /**
+   * 采集端抽样状态（D-P2，读自 `DASHCAM_DIR/meta.json`，仅开启时返回）：
+   * 按调用方指纹整体抽样，未抽中的调用方不产生任何记录，
+   * 请求量等汇总只反映被抽中部分——总量口径以 New API 主库为准。
+   */
+  sampling?: { modulus: number; keep: number };
 }
 
 export type DashcamRole = "system" | "user" | "assistant" | "tool" | "unknown";
