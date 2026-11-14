@@ -34,7 +34,7 @@ New API 自身不保存请求的提示词与模型返回，看板无法做内容
 | token 用量展示（索引优先 + 读时水合兜底） | 已实现（2026-11-14） | `src/server/dashcam/usage.ts`、`src/components/dashcam/token-pair.tsx` |
 | 用户详情「会话」区块 | 已实现 | `src/app/(console)/users/[id]/dashcam-*.tsx` |
 | 过期数据清理（clean-dashcam.sh，D-P1） | 已实现（2026-11-14） | `dashcam/clean-dashcam.sh`、[03-deployment.md](03-deployment.md) §7 |
-| 落盘异步化 + 资源围栏（D-P3） | **未实现（已裁决）** | 规划见 [06-performance-plan.md](06-performance-plan.md) §11 |
+| 落盘异步化 + 资源围栏（D-P3） | 已实现（2026-11-14） | `dashcam/capture.go`（sink/worker/预算）、`dashcam/main.go`（healthz/背板） |
 | 按调用方比例抽样（D-P2） | 已实现（2026-11-14） | `dashcam/config.go`（`sampled`）、`dashcam/capture.go`（meta.json）、`src/server/dashcam/meta.ts` |
 | 段式打包（D-P5） | **未实现（已裁决）** | 规划见 [06-performance-plan.md](06-performance-plan.md) §13 |
 

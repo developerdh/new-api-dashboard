@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
@@ -9,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -69,26 +68,82 @@ var (
 	peekLimit = 256 << 10
 )
 
+// captureCounters 是采集侧四个计数的共享存储：handler 与 flush worker 各自递增，
+// /healthz 汇总输出。dropped 与 buffered_bytes 为 D-P3 新增（06-performance-plan §7.4）。
+type captureCounters struct {
+	captured atomic.Int64
+	skipped  atomic.Int64
+	failed   atomic.Int64
+	dropped  atomic.Int64
+}
+
+// sink 是采集后台：请求 goroutine 只做内存缓冲与非阻塞入队，落盘/压缩/索引/正则
+// 全部由 flush worker 独占——磁盘抖动不影响转发，02-design §3"队列有界、满则丢弃"
+// 自此归真（D-P3）。
 type sink struct {
-	cfg config
+	cfg      config
+	counters *captureCounters
+
+	// buffered 是 reqBuf + resBuf + peek 的实时字节总量，预算 DASHCAM_MEM_BUDGET 的依据；
+	// 每个 chunk 一次 atomic add，预算超限触发三层降级（见 record.appendBuf/starve）。
+	buffered atomic.Int64
+
+	queue     chan *record
+	workers   sync.WaitGroup
+	closeOnce sync.Once
 
 	idxMu    sync.Mutex
 	idxFiles map[string]*os.File
 
 	dirMu    sync.Mutex
 	knownDir map[string]struct{}
+
+	// flushHook 仅供测试注入（慢盘模拟）：worker 在每条 flush 开始前同步调用，生产为 nil。
+	flushHook func(*record)
 }
 
-func newSink(cfg config) (*sink, error) {
+func newSink(cfg config, counters *captureCounters) (*sink, error) {
 	for _, sub := range []string{"blobs", "index"} {
 		if err := os.MkdirAll(filepath.Join(cfg.DashcamDir, sub), 0o750); err != nil {
 			return nil, err
 		}
 	}
-	return &sink{cfg: cfg, idxFiles: make(map[string]*os.File), knownDir: make(map[string]struct{})}, nil
+	s := &sink{
+		cfg:      cfg,
+		counters: counters,
+		queue:    make(chan *record, cfg.QueueCap),
+		idxFiles: make(map[string]*os.File),
+		knownDir: make(map[string]struct{}),
+	}
+	for range cfg.FlushWorkers {
+		s.workers.Add(1)
+		go func() {
+			defer s.workers.Done()
+			for rec := range s.queue {
+				s.flush(rec)
+			}
+		}()
+	}
+	return s, nil
 }
 
-// record 是一次请求的落盘句柄。写入失败只降级采集，绝不影响转发。
+// closeAndWait 关闭队列并等待 worker 排空（优雅停机）：队内记录全部落盘后才返回。
+// 队列容量 × 预算给定驻留上界，排空是秒级；进程被 SIGKILL 时队内记录全损，
+// 无索引行、无 blob，与"崩溃丢流中记录"同级可见性。幂等，可重复调用；
+// 排空后顺带关闭日索引句柄（干净停机释放 fd）。
+func (s *sink) closeAndWait() {
+	s.closeOnce.Do(func() { close(s.queue) })
+	s.workers.Wait()
+	s.idxMu.Lock()
+	defer s.idxMu.Unlock()
+	for name, f := range s.idxFiles {
+		f.Close()
+		delete(s.idxFiles, name)
+	}
+}
+
+// record 是一次请求的采集快照。缓冲只发生在转发 goroutine（纯内存 append），
+// 磁盘操作全部延迟到 flush worker——写入失败只降级采集，绝不影响转发。
 type record struct {
 	sink  *sink
 	trace string
@@ -97,17 +152,10 @@ type record struct {
 	start time.Time
 	ip    string
 
-	reqPath string
-	resPath string
-	reqFile *os.File
-	resFile *os.File
-	reqBuf  *bufio.Writer
-	resBuf  *bufio.Writer
-
-	reqN   int64
-	resN   int64
-	trunc  int
-	failed bool
+	reqBuf  []byte
+	resBuf  []byte
+	trunc   int
+	starved bool // 预算超限后停止缓冲本记录（三层降级第 2 层）
 
 	peek       []byte
 	model      string
@@ -116,67 +164,22 @@ type record struct {
 	firstByte  time.Time
 	status     int
 	errMsg     string
+	// ms 在 finish 入队时刻定格：总耗时指转发耗时，不含队列等待。
+	ms int64
 }
 
+// begin 只分配快照结构（纳秒级）：目录创建、文件命名与 trace 冲突处理全部搬到 flush。
+// 预算判定（三层降级第 1 层）在 handler 完成，这里不再检查。
 func (s *sink) begin(r *http.Request, token string) *record {
-	now := time.Now()
-	trace := pickTrace(r)
-	dir := filepath.Join(s.cfg.DashcamDir, "blobs", now.Format("2006-01-02"), token)
-	if err := s.ensureDir(dir); err != nil {
-		logEvent("warn", "capture_dir_failed", map[string]any{"trace": trace, "error": err.Error()})
-		return nil
+	return &record{
+		sink:   s,
+		trace:  pickTrace(r),
+		token:  token,
+		path:   r.URL.Path,
+		start:  time.Now(),
+		ip:     clientIP(r),
+		status: http.StatusOK,
 	}
-
-	var reqFile, resFile *os.File
-	var base string
-	// trace 可能被客户端复用（同一个 X-Request-Id 重试）：冲突时换后缀，保证
-	// 文件名与最终路径始终一致——否则 rename 会落到另一个名字上。
-	for attempt := 0; attempt < 3 && reqFile == nil; attempt++ {
-		candidate := trace
-		if attempt > 0 {
-			candidate = trace + "-" + randomHex(3)
-		}
-		candidateBase := filepath.Join(dir, candidate)
-		rf, ok := createExclusive(candidateBase + ".req.tmp")
-		if !ok {
-			continue
-		}
-		sf, ok := createExclusive(candidateBase + ".res.tmp")
-		if !ok {
-			rf.Close()
-			os.Remove(candidateBase + ".req.tmp")
-			continue
-		}
-		base, reqFile, resFile, trace = candidateBase, rf, sf, candidate
-	}
-	if reqFile == nil {
-		return nil
-	}
-
-	rec := &record{
-		sink:    s,
-		trace:   trace,
-		token:   token,
-		path:    r.URL.Path,
-		start:   now,
-		ip:      clientIP(r),
-		status:  http.StatusOK,
-		reqPath: base + ".req",
-		resPath: base + ".res",
-		reqFile: reqFile,
-		resFile: resFile,
-	}
-	rec.reqBuf = bufio.NewWriterSize(rec.reqFile, s.cfg.WriteBuffer)
-	rec.resBuf = bufio.NewWriterSize(rec.resFile, s.cfg.WriteBuffer)
-	return rec
-}
-
-func createExclusive(path string) (*os.File, bool) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
-	if err != nil {
-		return nil, false
-	}
-	return f, true
 }
 
 func (s *sink) ensureDir(dir string) error {
@@ -197,7 +200,7 @@ func (s *sink) ensureDir(dir string) error {
 
 // writeRequest 由 io.TeeReader 调用：永远返回 len(p)，保证转发不中断。
 func (r *record) writeRequest(p []byte) {
-	if r.failed {
+	if r.starved {
 		return
 	}
 	if len(r.peek) < peekLimit {
@@ -206,116 +209,187 @@ func (r *record) writeRequest(p []byte) {
 			need = len(p)
 		}
 		r.peek = append(r.peek, p[:need]...)
+		r.sink.buffered.Add(int64(need))
 	}
-	if r.reqN >= r.sink.cfg.MaxRequest {
+	if int64(len(r.reqBuf)) >= r.sink.cfg.MaxRequest {
 		r.trunc |= truncRequest
 		return
 	}
-	remain := r.sink.cfg.MaxRequest - r.reqN
+	remain := r.sink.cfg.MaxRequest - int64(len(r.reqBuf))
 	chunk := p
 	if int64(len(chunk)) > remain {
 		chunk = chunk[:remain]
 		r.trunc |= truncRequest
 	}
-	n, err := r.reqBuf.Write(chunk)
-	r.reqN += int64(n)
-	if err != nil {
-		r.failed = true
-	}
+	r.appendBuf(&r.reqBuf, chunk)
 }
 
 func (r *record) writeResponse(p []byte) {
-	if r.failed {
-		return
-	}
+	// 首字节时间照常记录：预算停缓冲只丢采集数据，不丢转发耗时口径。
 	if r.firstByte.IsZero() {
 		r.firstByte = time.Now()
 	}
-	if r.resN >= r.sink.cfg.MaxResponse {
+	if r.starved {
+		return
+	}
+	if int64(len(r.resBuf)) >= r.sink.cfg.MaxResponse {
 		r.trunc |= truncResponse
 		return
 	}
-	remain := r.sink.cfg.MaxResponse - r.resN
+	remain := r.sink.cfg.MaxResponse - int64(len(r.resBuf))
 	chunk := p
 	if int64(len(chunk)) > remain {
 		chunk = chunk[:remain]
 		r.trunc |= truncResponse
 	}
-	n, err := r.resBuf.Write(chunk)
-	r.resN += int64(n)
-	if err != nil {
-		r.failed = true
+	r.appendBuf(&r.resBuf, chunk)
+}
+
+// appendBuf 追加正文缓冲并计入全局预算。预算超限触发三层降级第 2 层（在途停缓冲）：
+// 释放本记录已缓冲正文、tr 位标记截断、dropped 累计，转发照常。
+func (r *record) appendBuf(buf *[]byte, chunk []byte) {
+	s := r.sink
+	if s.cfg.MemBudget > 0 && s.buffered.Load()+int64(len(chunk)) > s.cfg.MemBudget {
+		r.starve()
+		return
+	}
+	*buf = append(*buf, chunk...)
+	s.buffered.Add(int64(len(chunk)))
+}
+
+// starve 停止缓冲本记录：释放 reqBuf/resBuf（大块），保留 peek（有界，供元数据提取）。
+// tr 位是数据侧标记（索引行可见）；dropped 是资源侧累计（/healthz 可见）——
+// 分别对应 06-performance-plan §11.3 的"tr 位"与 §11.5.3 的"预算计 dropped"。
+func (r *record) starve() {
+	if r.starved {
+		return
+	}
+	r.starved = true
+	r.trunc |= truncRequest | truncResponse
+	r.sink.counters.dropped.Add(1)
+	released := int64(len(r.reqBuf)) + int64(len(r.resBuf))
+	r.reqBuf = nil
+	r.resBuf = nil
+	r.sink.buffered.Add(-released)
+}
+
+// release 归还本记录占用的全部预算字节；队满丢弃与 flush 完成后都要调用。
+func (r *record) release() {
+	n := int64(len(r.reqBuf)) + int64(len(r.resBuf)) + int64(len(r.peek))
+	r.reqBuf = nil
+	r.resBuf = nil
+	r.peek = nil
+	if n > 0 {
+		r.sink.buffered.Add(-n)
 	}
 }
 
 func (r *record) setStatus(code int) { r.status = code }
 
+// finish 非阻塞入队后立即返回：转发路径到此为止，磁盘交给 worker。
+// 队满（三层降级第 3 层）丢弃整条记录——无索引行、无 blob，dropped 累计。
 func (r *record) finish(errMsg string) {
-	defer func() {
-		if r.reqFile != nil {
-			r.reqFile.Close()
-		}
-		if r.resFile != nil {
-			r.resFile.Close()
-		}
-	}()
-
 	r.errMsg = errMsg
-	if r.reqBuf != nil {
-		if err := r.reqBuf.Flush(); err != nil {
-			r.failed = true
-		}
+	r.ms = time.Since(r.start).Milliseconds()
+	select {
+	case r.sink.queue <- r:
+	default:
+		r.sink.counters.dropped.Add(1)
+		r.release()
 	}
-	if r.resBuf != nil {
-		if err := r.resBuf.Flush(); err != nil {
-			r.failed = true
-		}
-	}
-	r.reqFile.Close()
-	r.resFile.Close()
+}
 
-	// 任何一步失败都保留原文件（.tmp 后缀），由清理脚本回收，不阻断主链路。
-	if r.failed {
-		logEvent("warn", "capture_write_failed", map[string]any{"trace": r.trace})
+// flush 把一条记录持久化：ensureDir → O_EXCL 定名 → 缓冲写盘（含 gzip 阈值判定）→
+// 正则提取 → usage 提取 → 追加索引。失败保留 .tmp 由清理脚本回收，failed++，不重试
+// （磁盘持续故障时重试会阻塞 worker）。不变式：索引行存在 ⇒ blob 已 rename 就位。
+func (s *sink) flush(rec *record) {
+	if s.flushHook != nil {
+		s.flushHook(rec)
+	}
+	defer rec.release()
+
+	day := rec.start.Format("2006-01-02")
+	dir := filepath.Join(s.cfg.DashcamDir, "blobs", day, rec.token)
+	if err := s.ensureDir(dir); err != nil {
+		s.counters.failed.Add(1)
+		logEvent("warn", "capture_dir_failed", map[string]any{"trace": rec.trace, "error": err.Error()})
 		return
 	}
 
-	// token 用量：compressIfNeeded 会把 .tmp rename（或转成 .gz），提取必须在它之前。
-	// 尾部扫描 + 少量小 JSON 解析，失败静默省略字段，不阻断落盘与索引。
-	usage := tokenUsage{}
-	if r.resN > 0 {
-		usage = extractUsageFromFile(r.resPath + ".tmp")
+	// trace 可能被客户端复用（同一个 X-Request-Id 重试）：冲突时换后缀，保证
+	// 文件名与最终路径始终一致——否则 rename 会落到另一个名字上。
+	// O_EXCL 候选循环从请求路径搬到 worker：跨重启的 .tmp 残留（崩溃产物）同样在此覆盖。
+	var base string
+	for attempt := 0; attempt < 3 && base == ""; attempt++ {
+		candidate := rec.trace
+		if attempt > 0 {
+			candidate = rec.trace + "-" + randomHex(3)
+		}
+		candidateBase := filepath.Join(dir, candidate)
+		rf, ok := createExclusive(candidateBase + ".req.tmp")
+		if !ok {
+			continue
+		}
+		sf, ok := createExclusive(candidateBase + ".res.tmp")
+		if !ok {
+			rf.Close()
+			os.Remove(candidateBase + ".req.tmp")
+			continue
+		}
+		rf.Close()
+		sf.Close()
+		base = candidateBase
+		rec.trace = candidate
+	}
+	if base == "" {
+		s.counters.failed.Add(1)
+		logEvent("warn", "capture_name_failed", map[string]any{"trace": rec.trace})
+		return
 	}
 
-	reqGz := r.sink.compressIfNeeded(r.reqPath+".tmp", r.reqPath, r.reqN)
-	resGz := r.sink.compressIfNeeded(r.resPath+".tmp", r.resPath, r.resN)
-
-	if m := modelPattern.FindSubmatch(r.peek); len(m) == 2 {
-		r.model = string(m[1])
+	reqGz, ok := s.flushBlob(base, ".req", rec.reqBuf)
+	if !ok {
+		s.counters.failed.Add(1)
+		logEvent("warn", "capture_write_failed", map[string]any{"trace": rec.trace})
+		return
 	}
-	r.isStream = streamPattern.Match(r.peek)
-	r.sessionKey = extractSessionKey(r.path, r.peek)
+	resGz, ok := s.flushBlob(base, ".res", rec.resBuf)
+	if !ok {
+		s.counters.failed.Add(1)
+		logEvent("warn", "capture_write_failed", map[string]any{"trace": rec.trace})
+		return
+	}
+
+	// 正则提取从请求路径移入 worker：模型名 / 流式标记 / 会话键。
+	if m := modelPattern.FindSubmatch(rec.peek); len(m) == 2 {
+		rec.model = string(m[1])
+	}
+	rec.isStream = streamPattern.Match(rec.peek)
+	rec.sessionKey = extractSessionKey(rec.path, rec.peek)
+
+	// token 用量：响应缓冲尾部窗口扫描（与旧"读 .tmp 尾部"同口径，数据源换成内存）。
+	usage := usageTail(rec.resBuf)
 
 	entry := indexEntry{
-		T:  r.trace,
-		U:  r.token,
-		D:  r.start.Format(time.RFC3339Nano),
-		P:  r.path,
-		M:  r.model,
-		S:  r.status,
-		ST: r.isStream,
-		MS: time.Since(r.start).Milliseconds(),
-		RQ: r.reqN,
-		RS: r.resN,
+		T:  rec.trace,
+		U:  rec.token,
+		D:  rec.start.Format(time.RFC3339Nano),
+		P:  rec.path,
+		M:  rec.model,
+		S:  rec.status,
+		ST: rec.isStream,
+		MS: rec.ms,
+		RQ: int64(len(rec.reqBuf)),
+		RS: int64(len(rec.resBuf)),
 		QZ: reqGz,
 		RZ: resGz,
-		TR: r.trunc,
-		E:  r.errMsg,
-		IP: r.ip,
-		K:  sessionKeyHash(r.sessionKey),
+		TR: rec.trunc,
+		E:  rec.errMsg,
+		IP: rec.ip,
+		K:  sessionKeyHash(rec.sessionKey),
 	}
-	if !r.firstByte.IsZero() {
-		entry.FT = r.firstByte.Sub(r.start).Milliseconds()
+	if !rec.firstByte.IsZero() {
+		entry.FT = rec.firstByte.Sub(rec.start).Milliseconds()
 	}
 	if !usage.empty() {
 		entry.PT = usage.prompt
@@ -323,63 +397,64 @@ func (r *record) finish(errMsg string) {
 		entry.CC = usage.cached
 		entry.CW = usage.cacheWrite
 	}
-	r.sink.appendIndex(r.start, entry)
+	s.appendIndex(rec.start, entry)
 }
 
-// compressIfNeeded 返回是否压缩成功。源文件用流式 Copy，内存不随体积增长。
-func (s *sink) compressIfNeeded(tmpPath, finalPath string, size int64) bool {
-	if s.cfg.GzipOver <= 0 || size < s.cfg.GzipOver {
-		if err := os.Rename(tmpPath, finalPath); err != nil {
-			logEvent("warn", "capture_rename_failed", map[string]any{"path": finalPath, "error": err.Error()})
-			return false
+// flushBlob 把一个正文缓冲写到最终 blob：≥GZIP_THRESHOLD 走 gzip（内存 → gz.tmp
+// 一次直达，结构上消灭旧 finish() 的"读 tmp + 压缩 + 删 tmp"三次 I/O），否则裸写。
+// 返回（是否 gzip，是否成功）。gzip 失败降级为裸写——qz/rz 只在真正压缩时为 true，
+// 与旧 compressIfNeeded 语义一致。
+func (s *sink) flushBlob(base, ext string, buf []byte) (bool, bool) {
+	finalPath := base + ext
+	if s.cfg.GzipOver > 0 && int64(len(buf)) >= s.cfg.GzipOver {
+		gzTmp := finalPath + ".gz.tmp"
+		if err := writeGzipFile(gzTmp, buf); err == nil {
+			if err := os.Rename(gzTmp, finalPath+".gz"); err == nil {
+				os.Remove(finalPath + ".tmp") // O_EXCL 预留的裸 tmp 不再需要
+				return true, true
+			}
+			os.Remove(gzTmp)
+		} else {
+			os.Remove(gzTmp)
 		}
-		return false
 	}
+	tmpPath := finalPath + ".tmp"
+	if err := os.WriteFile(tmpPath, buf, 0o640); err != nil {
+		return false, false
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return false, false
+	}
+	return false, true
+}
 
-	src, err := os.Open(tmpPath)
+func writeGzipFile(path string, buf []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
 	if err != nil {
-		return false
+		return err
 	}
-	defer src.Close()
-
-	dstPath := finalPath + ".gz.tmp"
-	dst, err := os.Create(dstPath)
-	if err != nil {
-		os.Rename(tmpPath, finalPath)
-		return false
-	}
-	zw := gzip.NewWriter(dst)
-	if _, err := io.Copy(zw, src); err != nil {
-		zw.Close()
-		dst.Close()
-		os.Remove(dstPath)
-		os.Rename(tmpPath, finalPath)
-		return false
+	zw := gzip.NewWriter(f)
+	if _, err := zw.Write(buf); err != nil {
+		f.Close()
+		return err
 	}
 	if err := zw.Close(); err != nil {
-		zw.Close()
-		dst.Close()
-		os.Remove(dstPath)
-		os.Rename(tmpPath, finalPath)
-		return false
+		f.Close()
+		return err
 	}
-	if err := dst.Close(); err != nil {
-		os.Remove(dstPath)
-		os.Rename(tmpPath, finalPath)
-		return false
+	return f.Close()
+}
+
+func createExclusive(path string) (*os.File, bool) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+	if err != nil {
+		return nil, false
 	}
-	src.Close()
-	if err := os.Rename(dstPath, finalPath+".gz"); err != nil {
-		os.Remove(dstPath)
-		os.Rename(tmpPath, finalPath)
-		return false
-	}
-	os.Remove(tmpPath)
-	return true
+	return f, true
 }
 
 // appendIndex 单次 write 追加整行：O_APPEND 下写 < PIPE_BUF 是原子的，
-// 多 goroutine 并发写同一文件不会互相撕裂。
+// 多 goroutine 并发写同一文件不会互相撕裂。只有 flush worker 调用。
 func (s *sink) appendIndex(day time.Time, entry indexEntry) {
 	line, err := json.Marshal(entry)
 	if err != nil {

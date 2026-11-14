@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -41,7 +40,8 @@ func main() {
 		os.Exit(probe(cfg.Listen))
 	}
 
-	sink, err := newSink(cfg)
+	counters := &captureCounters{}
+	sink, err := newSink(cfg, counters)
 	if err != nil {
 		// 记录目录不可用时仍然启动：宁可丢采集，也不能丢转发。
 		logEvent("error", "dashcam_dir_unavailable", map[string]any{"dir": cfg.DashcamDir, "error": err.Error()})
@@ -51,13 +51,15 @@ func main() {
 		logEvent("warn", "sampling_meta_failed", map[string]any{"error": err.Error()})
 	}
 
-	h := &handler{cfg: cfg, sink: sink, proxy: newProxy(cfg)}
+	h := &handler{cfg: cfg, sink: sink, proxy: newProxy(cfg), counters: counters}
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           h,
 		ReadHeaderTimeout: 15 * time.Second,
-		// 不设 WriteTimeout / IdleTimeout：流式响应可能持续十分钟以上。
-		ErrorLog: log.New(os.Stderr, "http ", log.LstdFlags),
+		// IdleTimeout 只回收请求间空闲的 keep-alive 连接，对流式响应零影响；
+		// WriteTimeout 仍不设——流式响应可能持续十分钟以上。
+		IdleTimeout: cfg.IdleTimeout,
+		ErrorLog:    log.New(os.Stderr, "http ", log.LstdFlags),
 	}
 
 	logEvent("info", "started", map[string]any{
@@ -77,6 +79,10 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
+		if sink != nil {
+			// 优雅停机排空队列：close(queue) → worker 清空后退出（D-P3 §11.5.4）。
+			sink.closeAndWait()
+		}
 		close(idle)
 	}()
 
@@ -89,13 +95,10 @@ func main() {
 }
 
 type handler struct {
-	cfg   config
-	sink  *sink
-	proxy *httputil.ReverseProxy
-
-	captured atomic.Int64
-	skipped  atomic.Int64
-	failed   atomic.Int64
+	cfg      config
+	sink     *sink
+	proxy    *httputil.ReverseProxy
+	counters *captureCounters
 }
 
 type ctxKey string
@@ -111,26 +114,27 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var rec *record
-	if h.sink != nil && h.cfg.shouldCapture(r.URL.Path) {
+	switch {
+	case h.sink == nil || !h.cfg.shouldCapture(r.URL.Path):
+		h.counters.skipped.Add(1)
+	default:
 		// 抽样判定（D-P2）在 begin 之前：未抽中的指纹完全不落盘，只进 skipped 计数。
 		fp := tokenFingerprint(r.Header.Get("Authorization"))
-		if h.cfg.sampled(fp) {
+		switch {
+		case !h.cfg.sampled(fp):
+			h.counters.skipped.Add(1)
+		case h.cfg.MemBudget == 0 || h.sink.buffered.Load() >= h.cfg.MemBudget:
+			// 预算超限 + 新请求 = 三层降级第 1 层；预算 0 = 停采总开关。跳过采集，转发照常。
+			h.counters.skipped.Add(1)
+		default:
 			rec = h.sink.begin(r, fp)
-			if rec != nil {
-				body := r.Body
-				r.Body = struct {
-					io.Reader
-					io.Closer
-				}{io.TeeReader(body, writerFunc(rec.writeRequest)), body}
-				h.captured.Add(1)
-			} else {
-				h.failed.Add(1)
-			}
-		} else {
-			h.skipped.Add(1)
+			body := r.Body
+			r.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.TeeReader(body, writerFunc(rec.writeRequest)), body}
+			h.counters.captured.Add(1)
 		}
-	} else {
-		h.skipped.Add(1)
 	}
 
 	box := &errorBox{}
@@ -144,15 +148,24 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveHealth 输出存活与采集计数。dropped = 队满丢弃 + 在途预算停缓冲累计，
+// buffered_bytes = 当前驻留内存字节数（gauge）——两者让"采集正在降级"可被发现
+// （06-performance-plan §7.4），不做直方图/p99。
 func (h *handler) serveHealth(w http.ResponseWriter) {
+	buffered := int64(0)
+	if h.sink != nil {
+		buffered = h.sink.buffered.Load()
+	}
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":       true,
-		"version":  version,
-		"captured": h.captured.Load(),
-		"skipped":  h.skipped.Load(),
-		"failed":   h.failed.Load(),
+		"ok":             true,
+		"version":        version,
+		"captured":       h.counters.captured.Load(),
+		"skipped":        h.counters.skipped.Load(),
+		"failed":         h.counters.failed.Load(),
+		"dropped":        h.counters.dropped.Load(),
+		"buffered_bytes": buffered,
 	})
 }
 
@@ -162,8 +175,11 @@ func newProxy(cfg config) *httputil.ReverseProxy {
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:          512,
-		MaxIdleConnsPerHost:   256,
+		MaxIdleConns:        512,
+		MaxIdleConnsPerHost: 256,
+		// 唯一作用于转发的限制（D-P3 背板）：超限时新请求排队等空闲连接而非新建，
+		// 把"fd 耗尽/OOM 进程崩溃"转化为"排队延迟上升"。
+		MaxConnsPerHost:       cfg.MaxConnsPerHost,
 		IdleConnTimeout:       90 * time.Second,
 		ResponseHeaderTimeout: cfg.HeaderTimeout,
 		ExpectContinueTimeout: time.Second,

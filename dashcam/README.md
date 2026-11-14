@@ -41,7 +41,7 @@ $DASHCAM_DIR/
 
 - 代理**拿不到 user_id**（new-api 不透传），因此用 `sha256(Authorization)` 前 12 位作为调用方维度。看板读取时用该指纹反查 token → user。
 - 文件名固定为 `<trace>.req` / `<trace>.res`，是否带 `.gz` 由索引里的 `qz` / `rz` 决定，不要猜。
-- 大文件用流式 gzip，内存不随体积增长。
+- 落盘/压缩/索引由后台 worker 执行（转发路径只做内存缓冲 + 入队），大文件 gzip 在 worker 一次直达。
 
 ### 索引行
 
@@ -86,9 +86,16 @@ token 提取的解析口径与看板侧（`src/server/dashcam/normalize.ts`）�
 | `GZIP_THRESHOLD` | `65536` | 超过则压缩；`0` 关闭 |
 | `SAMPLE_MODULUS` | `0` | 按调用方指纹整体抽样模数 N；`0` = 全量记录（关闭） |
 | `SAMPLE_KEEP` | `1` | 抽样保留数 K，启用时须 `1 ≤ K ≤ N` |
+| `DASHCAM_MEM_BUDGET` | `268435456`（256 MB） | 采集缓冲内存预算；超限三层降级只丢采集；`0` = 停采总开关 |
+| `DASHCAM_FLUSH_WORKERS` | `2` | 落盘 worker 数（压缩/索引/正则都在 worker 上） |
+| `DASHCAM_QUEUE_CAP` | `256` | 待落盘队列容量（条），队满丢弃并计 `dropped` |
 | `UPSTREAM_HEADER_TIMEOUT` | `300s` | 等待上游响应头，不含 body |
+| `UPSTREAM_MAX_CONNS_PER_HOST` | `2048` | 上游每主机连接上限，超限排队而非新建 |
+| `IDLE_TIMEOUT` | `120s` | keep-alive 空闲连接回收，不影响流式响应 |
 
-内存占用与 body 大小无关：请求/响应都是边转发边写盘，常驻约为每请求 64 KiB 缓冲。
+落盘异步化（D-P3）：转发 goroutine 只做内存缓冲与非阻塞入队，磁盘抖动不影响转发；
+内存驻留由全局预算管住，预算超限按「拒收新请求 → 在途停缓冲 → 队满丢弃」三层降级，
+每一步只丢采集。优雅停机（SIGTERM）会先排空队列再退出。
 
 ## 构建
 
@@ -205,9 +212,11 @@ location /v1/ {
 |---|---|---|
 | 代理未启动 | nginx 2 次失败后切 backup | 无（丢采集） |
 | 记录目录不可写 | 启动仍成功，采集日志报 `dashcam_dir_unavailable` | 无 |
-| 磁盘写满 | 该请求采集失败，`capture_write_failed` | 无 |
+| 磁盘写满 | flush 失败计 `failed`，残留 `.tmp` 由清理脚本回收 | 无 |
+| 内存预算超限 / 队列满 | 三层降级：拒收新请求 → 在途停缓冲 → 丢记录，`dropped`/`skipped` 增长 | 无（只丢采集） |
 | 上游不可达 | 返回 502 JSON | 有（与直连表现一致） |
 | 转发中途崩溃 | 该请求失败且无法重试 | 有（唯一残余风险） |
+| SIGTERM 优雅停机 | 先排空待落盘队列再退出 | 无 |
 
 ## 清理
 
@@ -225,7 +234,8 @@ DASHCAM_DIR=/var/lib/new-api-dashboard/dashcam ./clean-dashcam.sh --confirm
 ## 验证
 
 ```bash
-# 存活
+# 存活（captured/skipped/failed/dropped 计数 + buffered_bytes 内存驻留 gauge；
+# dropped 持续增长说明正在降级——磁盘慢或预算不足）
 curl -s http://127.0.0.1:3090/healthz
 
 # 灌一条并确认落盘

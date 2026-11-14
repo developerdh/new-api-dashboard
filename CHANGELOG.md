@@ -14,6 +14,13 @@
   （`sha256(指纹) % N < K` 判定，默认关闭 = 全量记录），被抽中指纹全量记录、未抽中不落盘；
   启动时把抽样状态写入 `DASHCAM_DIR/meta.json`，看板会话列表据此展示统一口径提示
   （未抽中的调用方不产生任何记录，总量以 New API 主库为准）。
+- **落盘异步化 + 资源围栏（D-P3）**：转发 goroutine 只做内存缓冲与非阻塞入队，
+  落盘/压缩/索引/正则全部移入后台 worker（`DASHCAM_FLUSH_WORKERS=2`、队列
+  `DASHCAM_QUEUE_CAP=256` 有界满则丢弃），磁盘抖动不再影响 LLM 请求；
+  全局内存预算 `DASHCAM_MEM_BUDGET`（默认 256 MB，`0` = 停采总开关）三层降级
+  （拒收新请求 → 在途停缓冲 → 丢记录），`/healthz` 新增 `dropped` 与
+  `buffered_bytes`；新增转发侧背板 `UPSTREAM_MAX_CONNS_PER_HOST` 与
+  `IDLE_TIMEOUT`；磁盘格式零变化，新旧二进制可随时互换回滚。
 - **提示词与响应采集（new-api-dashcam）**：独立 Go 前置代理，把白名单对话接口的请求与响应原样落盘
   （按天 NDJSON 索引 + blob 文件），转发零第三方依赖，仅丢采集不丢调用。
   - 索引含模型、状态、耗时、截断位、会话键哈希（`k`）与 token 用量（`pt`/`ct`/`cc`/`cw`，

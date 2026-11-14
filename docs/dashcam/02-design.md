@@ -49,9 +49,11 @@ dashboard :3088 ── 读 data/dashcam（:ro 挂载）── 渲染会话
 
 支撑上述行为的三条实现约束，不可放松：
 
-1. 写盘永远在客户端写入之后，磁盘慢只造成采集延迟。
-2. 采集队列有界，满则丢弃并计数，绝不反压转发。
+1. 转发 goroutine 只做内存缓冲（memcpy）与非阻塞入队；落盘/压缩/索引/正则由后台 worker 独占（D-P3），磁盘慢只造成采集延迟。
+2. 采集队列有界（`DASHCAM_QUEUE_CAP`，默认 256），满则丢弃并计数，绝不反压转发。
 3. 任何采集异常只写日志，不改变响应状态码与内容。
+
+资源围栏（D-P3）：全局字节预算 `DASHCAM_MEM_BUDGET`（默认 256 MB，`0` = 停采总开关）约束在途缓冲总量；三层降级依次为——预算超限拒收新请求（`skipped++`）、在途记录停止缓冲（释放正文内存、索引行置 `tr` 位、`dropped++`）、队满丢弃整条（`dropped++`）。每一步只丢采集，转发零感知。`/healthz` 输出 `dropped` 与 `buffered_bytes` 供发现"正在降级"。
 
 ## 4. 存储布局
 
@@ -100,8 +102,10 @@ fp = sha256("Bearer sk-" + tokens.key)[:12]
 
 ### 4.3 原子性
 
-写入流程：`<name>.req.tmp` → 关闭 → （可选 gzip）→ `rename` 到 `<name>.req`。
+写入流程（flush worker 执行）：缓冲 → `<name>.req[.gz].tmp` → `rename` 到最终名。
 同目录 `rename` 在 POSIX 下原子，读取方不会看到半个文件。索引行在 `rename` 之后追加，避免索引指向不存在的文件。
+
+请求侧只有内存缓冲与非阻塞入队：预算超限拒收新请求、在途停缓冲（tr 位 + dropped）、队满丢弃——三层降级见 §3。
 
 ### 4.4 抽样状态（meta.json，D-P2）
 
@@ -158,8 +162,13 @@ fp = sha256("Bearer sk-" + tokens.key)[:12]
 | `MAX_REQUEST_BYTES` | 128 MiB | 落盘上限，超出截断并置 `tr` 位；**转发不截断** |
 | `MAX_RESPONSE_BYTES` | 128 MiB | 同上 |
 | `GZIP_THRESHOLD` | 64 KiB | 超过则压缩，`0` 关闭 |
+| `DASHCAM_MEM_BUDGET` | 256 MB | 采集缓冲字节预算（reqBuf+resBuf+peek 总量）；`0` = 停采总开关 |
+| `DASHCAM_FLUSH_WORKERS` | 2 | 落盘 worker 数（压缩/索引/正则都在 worker） |
+| `DASHCAM_QUEUE_CAP` | 256 | 待落盘队列容量（条），满则丢弃计数 |
+| `UPSTREAM_MAX_CONNS_PER_HOST` | 2048 | 上游每主机连接上限（转发侧背板） |
+| `IDLE_TIMEOUT` | 120s | keep-alive 空闲连接回收（对流式响应零影响） |
 
-128 MiB 用于覆盖 1M tokens 上下文（约 4–5 MB JSON）并给多模态留余量。实现为边转发边写盘（`io.TeeReader`），**内存占用与 body 大小无关**，常驻约每请求 64 KiB 缓冲，因此该值属于磁盘防御而非内存防御。
+128 MiB 用于覆盖 1M tokens 上下文（约 4–5 MB JSON）并给多模态留余量。D-P3 后正文先进内存缓冲再由 worker 落盘，逐条上限属于磁盘防御；内存上限由全局预算（`DASHCAM_MEM_BUDGET`）管住：100 QPS × 平均 4.4s ≈ 183 MB 在途，预算超限触发三层降级（见 §3）。
 
 ### 6.2 体积估算
 
