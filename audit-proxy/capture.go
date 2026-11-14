@@ -280,15 +280,15 @@ func (r *record) finish(errMsg string) {
 		return
 	}
 
-	reqGz := r.sink.compressIfNeeded(r.reqPath+".tmp", r.reqPath, r.reqN)
-	resGz := r.sink.compressIfNeeded(r.resPath+".tmp", r.resPath, r.resN)
-
 	// token 用量：compressIfNeeded 会把 .tmp rename（或转成 .gz），提取必须在它之前。
 	// 尾部扫描 + 少量小 JSON 解析，失败静默省略字段，不阻断落盘与索引。
 	usage := tokenUsage{}
 	if r.resN > 0 {
 		usage = extractUsageFromFile(r.resPath + ".tmp")
 	}
+
+	reqGz := r.sink.compressIfNeeded(r.reqPath+".tmp", r.reqPath, r.reqN)
+	resGz := r.sink.compressIfNeeded(r.resPath+".tmp", r.resPath, r.resN)
 
 	if m := modelPattern.FindSubmatch(r.peek); len(m) == 2 {
 		r.model = string(m[1])
