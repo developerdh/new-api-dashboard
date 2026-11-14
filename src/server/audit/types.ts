@@ -124,11 +124,6 @@ export interface AuditConversationRow {
   truncatedCount: number;
   totalRequestBytes: number;
   totalResponseBytes: number;
-  /**
-   * 会话内**最近一轮**请求的 token 用量（不是会话累计——累计需要读全部正文，
-   * 成本随轮次线性增长，超出列表的预算口径）。
-   */
-  usage?: AuditUsage;
   /** 会话内最新一条请求（未聚合时即该请求本身，用于打开详情 / 线程锚点） */
   last: AuditSessionRow;
 }
