@@ -272,6 +272,7 @@ function TurnCard({
   onToggle,
   filter,
   highlight,
+  testId,
 }: {
   userId: string;
   turn: DashcamThreadTurn;
@@ -279,9 +280,11 @@ function TurnCard({
   onToggle: () => void;
   filter: BlockFilter;
   highlight: string;
+  /** e2e 定位用（tests/e2e/TESTIDS.md）；挂在轮次卡片根节点，data-turn 为轮次序号 */
+  testId?: string;
 }) {
   return (
-    <div className={`rounded-xl border ${open ? "bg-card" : "bg-card/60"}`}>
+    <div data-testid={testId} data-turn={turn.index} className={`rounded-xl border ${open ? "bg-card" : "bg-card/60"}`}>
       <button
         type="button"
         onClick={onToggle}
@@ -383,6 +386,7 @@ export function DashcamThreadDialog({
       }}
     >
       <DialogContent
+        data-testid="thread-dialog"
         showCloseButton={false}
         className={cn(
           // 抽屉形态：右贴边全高；全屏时占满整个视口宽度并去掉左边框。
@@ -439,6 +443,7 @@ export function DashcamThreadDialog({
               size="icon"
               variant="ghost"
               className="size-7"
+              data-testid="thread-close"
               onClick={onClose}
               aria-label="关闭"
             >
@@ -486,6 +491,7 @@ export function DashcamThreadDialog({
               {turns.map((turn) => (
                 <TurnCard
                   key={`${turn.date}-${turn.traceId}`}
+                  testId="thread-turn"
                   userId={userId}
                   turn={turn}
                   open={override[turn.index] ?? turn.index === lastIndex}

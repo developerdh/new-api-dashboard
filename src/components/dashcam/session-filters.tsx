@@ -36,11 +36,14 @@ function Chips<T extends string>({
   value,
   onChange,
   label,
+  testIdPrefix,
 }: {
   options: ReadonlyArray<{ key: T; label: string }>;
   value: T;
   onChange: (next: T) => void;
   label: string;
+  /** data-testid 前缀：生成 `<prefix>-<key>`，供 e2e 定位（见 tests/e2e/TESTIDS.md） */
+  testIdPrefix: string;
 }) {
   return (
     <div className="flex items-center gap-1" role="group" aria-label={label}>
@@ -51,6 +54,7 @@ function Chips<T extends string>({
           size="sm"
           variant={value === item.key ? "secondary" : "ghost"}
           aria-pressed={value === item.key}
+          data-testid={`${testIdPrefix}-${item.key}`}
           onClick={() => onChange(item.key)}
         >
           {item.label}
@@ -95,6 +99,7 @@ export function SessionFilters({
         value={view.group}
         onChange={(group) => onChange({ group })}
         label="列表粒度"
+        testIdPrefix="sessions-group"
       />
       <span className="mx-1 h-4 w-px bg-border" />
       <Chips
@@ -102,12 +107,14 @@ export function SessionFilters({
         value={view.stream}
         onChange={(stream) => onChange({ stream })}
         label="请求形态"
+        testIdPrefix="sessions-stream"
       />
       <Button
         type="button"
         size="sm"
         variant={view.failedOnly ? "secondary" : "ghost"}
         aria-pressed={view.failedOnly}
+        data-testid="sessions-filter-failed"
         onClick={() => onChange({ failedOnly: !view.failedOnly })}
       >
         仅错误
@@ -130,6 +137,7 @@ export function SessionFilters({
         onClick={onRefresh}
         aria-label="刷新会话列表"
         title="刷新"
+        data-testid="sessions-filter-refresh"
       >
         <RotateCw className={cn("size-3.5", refreshing && "animate-spin")} />
       </Button>

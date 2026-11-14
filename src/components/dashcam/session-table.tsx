@@ -27,7 +27,7 @@ import type { DashcamConversationRow, DashcamSessionRow } from "@/server/dashcam
 export function UngroupedHint({ count }: { count: number }) {
   if (count === 0) return null;
   return (
-    <p className="mb-2 text-[11px] text-muted-foreground">
+    <p data-testid="sessions-ungrouped-hint" className="mb-2 text-[11px] text-muted-foreground">
       其中 {count} 条请求没有会话标识，<span className="font-medium text-foreground">未参与聚合</span>
       （会话键列为 —），按单次请求各自成行。
     </p>
@@ -61,7 +61,7 @@ export function ConversationTable({
   onOpen: (row: DashcamConversationRow) => void;
 }) {
   return (
-    <Table className="border-separate border-spacing-0">
+    <Table data-testid="sessions-table-session" className="border-separate border-spacing-0">
       <TableHeader className="sticky top-0 z-10 bg-card">
         <TableRow>
           <TableHead>最近一次</TableHead>
@@ -79,6 +79,7 @@ export function ConversationTable({
         {rows.map((row) => (
           <TableRow
             key={row.sessionKey ?? `${row.last.date}-${row.last.traceId}`}
+            data-testid="sessions-row"
             className="cursor-pointer"
             tabIndex={0}
             onClick={() => onOpen(row)}
@@ -127,7 +128,7 @@ export function RequestTable({
   onOpen: (row: DashcamSessionRow) => void;
 }) {
   return (
-    <Table className="border-separate border-spacing-0">
+    <Table data-testid="sessions-table-request" className="border-separate border-spacing-0">
       <TableHeader className="sticky top-0 z-10 bg-card">
         <TableRow>
           <TableHead>时间</TableHead>
@@ -151,6 +152,7 @@ export function RequestTable({
         {rows.map((row) => (
           <TableRow
             key={`${row.date}-${row.traceId}-${row.fp}`}
+            data-testid="sessions-row"
             className="cursor-pointer"
             tabIndex={0}
             onClick={() => onOpen(row)}

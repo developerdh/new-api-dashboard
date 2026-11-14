@@ -113,7 +113,7 @@ export function DashcamSessions({
   const detailHref = `/users/${encodeURIComponent(userId)}/sessions?${detailParams.toString()}`;
 
   return (
-    <Card className="gap-3 py-5">
+    <Card data-testid="sessions-card" className="gap-3 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5">
         <div className="flex flex-wrap items-baseline gap-2">
           <h2 className="text-sm font-semibold">会话</h2>
@@ -132,6 +132,7 @@ export function DashcamSessions({
                 target="_blank"
                 rel="noopener noreferrer"
                 title="在新窗口打开完整列表（累加加载）"
+                data-testid="sessions-open-full-list"
               >
                 完整列表
                 <ExternalLink className="size-3.5" />

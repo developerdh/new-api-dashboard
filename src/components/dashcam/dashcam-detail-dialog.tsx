@@ -199,6 +199,7 @@ export function DashcamDetailDialog({
       }}
     >
       <DialogContent
+        data-testid="detail-dialog"
         showCloseButton={false}
         className={cn(
           // 抽屉形态：右贴边全高；全屏时占满整个视口宽度并去掉左边框。
@@ -241,6 +242,7 @@ export function DashcamDetailDialog({
               size="icon"
               variant="ghost"
               className="size-7"
+              data-testid="detail-fullscreen"
               onClick={() => setFull((value) => !value)}
               aria-label={full ? "退出全屏" : "全屏显示"}
               title={full ? "退出全屏" : "全屏显示（查看长报文更方便）"}
@@ -252,6 +254,7 @@ export function DashcamDetailDialog({
               size="icon"
               variant="ghost"
               className="size-7"
+              data-testid="detail-close"
               onClick={onClose}
               aria-label="关闭"
             >
@@ -329,6 +332,7 @@ export function DashcamDetailDialog({
             <button
               key={item.key}
               type="button"
+              data-testid={`detail-tab-${item.key}`}
               onClick={() => setTab(item.key)}
               aria-pressed={activeTab === item.key}
               className={`border-b-2 px-3 py-2 text-xs transition-colors ${

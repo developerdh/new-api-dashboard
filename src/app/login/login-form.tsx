@@ -95,6 +95,7 @@ export function LoginForm() {
               ref={userRef}
               id="login-username"
               name="username"
+              data-testid="login-username"
               type="text"
               autoComplete="username"
               placeholder="请输入账号"
@@ -121,6 +122,7 @@ export function LoginForm() {
             <Input
               id="login-password"
               name="password"
+              data-testid="login-password"
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               placeholder="请输入密码"
@@ -157,6 +159,7 @@ export function LoginForm() {
 
         <Button
           type="submit"
+          data-testid="login-submit"
           className="h-11 w-full gap-2 text-sm font-medium"
           disabled={submitting || username === "" || password === ""}
         >

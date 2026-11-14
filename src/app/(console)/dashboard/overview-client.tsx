@@ -256,6 +256,7 @@ export function OverviewClient() {
                   type="button"
                   size="sm"
                   variant="ghost"
+                  data-testid="overview-ranking-view-all"
                   onClick={() => setRankingOpen(true)}
                   disabled={rankingRows.length === 0}
                 >
@@ -350,7 +351,7 @@ export function OverviewClient() {
           </div>
         </Card>
 
-        <DialogContent className="sm:max-w-3xl">
+        <DialogContent data-testid="overview-ranking-dialog" className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>用户消耗排行 · 全部</DialogTitle>
             <DialogDescription>当前区间共 {rankingRows.length} 位用户。</DialogDescription>
@@ -372,6 +373,7 @@ export function OverviewClient() {
                       <div className="flex flex-col">
                         <Link
                           className="underline-offset-4 hover:underline"
+                          data-testid="overview-ranking-user-link"
                           href={userDetailHref(
                             row.userId,
                             row.username,
