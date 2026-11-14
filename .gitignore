@@ -17,6 +17,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+!tests/e2e/.env.e2e.example
 
 # 运行时生成物
 public/snapshots/
