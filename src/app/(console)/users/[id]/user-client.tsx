@@ -291,6 +291,14 @@ export function UserClient({ userId }: { userId: string }) {
         </div>
       </Card>
 
+      <AuditSessions
+        userId={userId}
+        start={range.start}
+        end={range.end}
+        displayName={identity.displayName}
+        username={identity.username}
+      />
+
       <Card className="gap-3 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">
           <h2 className="text-sm font-semibold">最近使用记录</h2>
@@ -374,14 +382,6 @@ export function UserClient({ userId }: { userId: string }) {
           </SectionBody>
         </div>
       </Card>
-
-      <AuditSessions
-        userId={userId}
-        start={range.start}
-        end={range.end}
-        displayName={identity.displayName}
-        username={identity.username}
-      />
 
       <Card className="gap-3 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">
