@@ -101,19 +101,13 @@ export async function GET(request: Request): Promise<Response> {
 
     if (grouped) {
       const result = await scanConversations(scanInput);
-      // 会话行的 token 只取「最近一轮」（row.last）：会话累计需要读全部正文，成本随轮次线性走
-      const usages = await hydrateSessionUsages(
-        dir,
-        result.conversations.map((conversation) => conversation.last),
-      );
+      // 聚合行不带 token：会话累计需读全部正文（成本随轮次线性走），
+      // 「最近一轮」的口径又容易误导；token 在线程/详情按需展示。
       const data: AuditSessionList = {
         available: true,
         grouped: true,
         sessions: [],
-        conversations: result.conversations.map((conversation) => {
-          const last = attachUsage(conversation.last, usages);
-          return { ...conversation, last, ...(last.usage === undefined ? {} : { usage: last.usage }) };
-        }),
+        conversations: result.conversations,
         page: query.page,
         pageSize: query.limit,
         total: result.total,

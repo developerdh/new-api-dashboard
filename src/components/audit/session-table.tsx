@@ -72,12 +72,6 @@ export function ConversationTable({
           <TableHead>模型</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="text-right">起止跨度</TableHead>
-          <TableHead
-            className="text-right"
-            title="最近一轮请求的 token 用量（缓存=命中缓存的输入 token）；悬停单元格可见正文字节"
-          >
-            <TokenPairHead />
-          </TableHead>
           <TableHead className="w-6" />
         </TableRow>
       </TableHeader>
@@ -116,20 +110,6 @@ export function ConversationTable({
             </TableCell>
             <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
               {row.requestCount > 1 ? formatDuration(row.lastEpoch - row.firstEpoch) : "—"}
-            </TableCell>
-            <TableCell
-              className="text-right tabular-nums"
-              title={
-                row.usage === undefined
-                  ? `正文累计 ${formatBytes(row.totalRequestBytes)} → ${formatBytes(row.totalResponseBytes)}`
-                  : `最近一轮 · 正文 ${formatBytes(row.last.requestBytes)} → ${formatBytes(row.last.responseBytes)}`
-              }
-            >
-              {row.usage === undefined ? (
-                <span className="text-muted-foreground">—</span>
-              ) : (
-                <TokenPair usage={row.usage} />
-              )}
             </TableCell>
             <TableCell className="text-muted-foreground">›</TableCell>
           </TableRow>
