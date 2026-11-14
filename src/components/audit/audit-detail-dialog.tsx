@@ -13,6 +13,12 @@ import { Loader2, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { StatusBadge, Tag } from "@/components/audit/badges";
+import {
+  blockMatches,
+  isDefaultFilter,
+  MessageFilterBar,
+  type BlockFilter,
+} from "@/components/audit/audit-message-filters";
 import { MessageBlock } from "@/components/audit/message-block";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,58 +31,14 @@ import { formatBytes, formatDateTimeSecond, formatNumber } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 import type {
-  AuditBlock,
-  AuditRole,
   AuditSessionDetail,
   AuditSessionRow,
 } from "@/server/audit/types";
 
 type Tab = "struct" | "raw" | "events";
-type RoleFilter = "all" | AuditRole;
-type KindFilter = "all" | "text" | "tool" | "image";
-
-const ROLE_FILTERS: Array<{ key: RoleFilter; label: string }> = [
-  { key: "all", label: "全部角色" },
-  { key: "system", label: "系统" },
-  { key: "user", label: "用户" },
-  { key: "assistant", label: "助手" },
-  { key: "tool", label: "工具" },
-];
-
-const KIND_FILTERS: Array<{ key: KindFilter; label: string }> = [
-  { key: "all", label: "全部类型" },
-  { key: "text", label: "文本" },
-  { key: "tool", label: "工具" },
-  { key: "image", label: "图片" },
-];
 
 /** 请求默认只展开的上下文条数。 */
 const RECENT_BLOCKS = 3;
-
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-        active
-          ? "border-primary bg-primary/10 text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-muted"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 
 function SectionTitle({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
@@ -122,24 +84,6 @@ function RawPane({ text, label }: { text: string; label: string }) {
   );
 }
 
-function kindMatches(block: AuditBlock, kind: KindFilter): boolean {
-  if (kind === "all") return true;
-  if (kind === "text") return block.kind === "text" || block.kind === "other";
-  if (kind === "tool") return block.kind === "tool_call" || block.kind === "tool_result";
-  return block.kind === "image";
-}
-
-function blockText(block: AuditBlock): string {
-  return [
-    block.text ?? "",
-    block.tool?.name ?? "",
-    block.tool?.arguments ?? "",
-    block.tool?.callId ?? "",
-  ]
-    .join(" ")
-    .toLowerCase();
-}
-
 function UsageStrip({
   usage,
 }: {
@@ -179,13 +123,13 @@ export function AuditDetailDialog({
   // 全屏是视图偏好，切换请求时保持
   const [full, setFull] = useState(false);
   const [tab, setTab] = useState<Tab>("struct");
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
-  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [filter, setFilter] = useState<BlockFilter>({ role: "all", kind: "all", query: "" });
   const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
   // 防抖：输入停顿 180ms 后再过滤，避免长会话逐键全量扫描
   useEffect(() => {
-    const timer = setTimeout(() => setKeyword(keywordInput), 180);
+    const timer = setTimeout(() => {
+      setFilter((current) => ({ ...current, query: keywordInput.trim().toLowerCase() }));
+    }, 180);
     return () => clearTimeout(timer);
   }, [keywordInput]);
   const [expandEarly, setExpandEarly] = useState(false);
@@ -220,18 +164,10 @@ export function AuditDetailDialog({
   const requestBlocks = envelope?.request.messages ?? [];
   const outputBlocks = envelope?.response.outputs ?? [];
   const allBlocks = [...requestBlocks, ...outputBlocks];
-  const query = keyword.trim().toLowerCase();
-  const defaultFilter = roleFilter === "all" && kindFilter === "all" && query === "";
+  const defaultFilter = isDefaultFilter(filter);
 
-  const matches = (block: AuditBlock): boolean => {
-    if (roleFilter !== "all" && block.role !== roleFilter) return false;
-    if (!kindMatches(block, kindFilter)) return false;
-    if (query !== "" && !blockText(block).includes(query)) return false;
-    return true;
-  };
-
-  const requestShown = requestBlocks.filter(matches);
-  const outputShown = outputBlocks.filter(matches);
+  const requestShown = requestBlocks.filter((block) => blockMatches(block, filter));
+  const outputShown = outputBlocks.filter((block) => blockMatches(block, filter));
   const hitCount = requestShown.length + outputShown.length;
   const earlyCount =
     requestBlocks.length > RECENT_BLOCKS ? requestBlocks.length - RECENT_BLOCKS : 0;
@@ -247,13 +183,11 @@ export function AuditDetailDialog({
   const activeTab = tabs.some((item) => item.key === tab) ? tab : "struct";
 
   const resetFilters = (): void => {
-    setRoleFilter("all");
-    setKindFilter("all");
+    setFilter({ role: "all", kind: "all", query: "" });
     setKeywordInput("");
-    setKeyword("");
     setExpandEarly(false);
   };
-  const highlight = keyword.trim();
+  const highlight = keywordInput.trim();
 
   return (
     <Dialog
@@ -402,37 +336,14 @@ export function AuditDetailDialog({
         </div>
 
         {activeTab === "struct" && envelope !== undefined ? (
-          <div className="flex flex-wrap items-center gap-1 border-b px-5 py-1.5">
-            {ROLE_FILTERS.map((item) => (
-              <Chip
-                key={item.key}
-                active={roleFilter === item.key}
-                onClick={() => setRoleFilter(item.key)}
-              >
-                {item.label}
-              </Chip>
-            ))}
-            <span className="mx-1 h-4 w-px bg-border" />
-            {KIND_FILTERS.map((item) => (
-              <Chip
-                key={item.key}
-                active={kindFilter === item.key}
-                onClick={() => setKindFilter(item.key)}
-              >
-                {item.label}
-              </Chip>
-            ))}
-            <input
-              value={keywordInput}
-              onChange={(event) => setKeywordInput(event.target.value)}
-              placeholder="搜索内容"
-              className="ml-1 h-6 w-32 rounded-md border border-input bg-transparent px-2 text-[11px] outline-none focus-visible:border-ring"
+          <div className="border-b px-5 py-1.5">
+            <MessageFilterBar
+              filter={filter}
+              queryInput={keywordInput}
+              onFilterChange={(patch) => setFilter((current) => ({ ...current, ...patch }))}
+              onQueryInputChange={setKeywordInput}
+              onReset={resetFilters}
             />
-            {defaultFilter ? null : (
-              <button type="button" className="ml-1 text-[11px] text-primary hover:underline" onClick={resetFilters}>
-                清空
-              </button>
-            )}
           </div>
         ) : null}
 
