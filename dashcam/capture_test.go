@@ -187,10 +187,19 @@ func TestFlushAsyncLifecycle(t *testing.T) {
 		t.Fatalf("小体积不压缩、会话键应存在: %+v", entry)
 	}
 
-	reqData, err := os.ReadFile(filepath.Join(s.cfg.DashcamDir, "blobs",
-		time.Now().Format("2006-01-02"), testFP, entry.T+".req"))
-	if err != nil || string(reqData) != reqBody {
-		t.Fatalf("请求 blob 内容不符: err=%v data=%q", err, reqData)
+	// D-P5 段式打包：正文在 seg/off/ln 指向的段记录里，payload 未压缩
+	if entry.SEG == "" || entry.OFF != 0 || entry.LN <= packHeaderLen {
+		t.Fatalf("索引应携带段定位字段: %+v", entry)
+	}
+	reqData, resData, flags := readPackRecord(t, s.cfg.DashcamDir, testFP, rec.start.Format("2006-01-02"), entry)
+	if string(reqData) != reqBody {
+		t.Fatalf("请求 payload 内容不符: %q", reqData)
+	}
+	if string(resData) != "data: hello\n\n"+resTail {
+		t.Fatalf("响应 payload 内容不符: %q", resData)
+	}
+	if flags != 0 {
+		t.Fatalf("小体积不应压缩: flags=%d", flags)
 	}
 	if s.buffered.Load() != 0 {
 		t.Fatalf("flush 完成后预算应归零，得到 %d", s.buffered.Load())
@@ -214,18 +223,21 @@ func TestFlushGzipThreshold(t *testing.T) {
 		t.Fatalf("rq 应为截断前缓冲长度: %d", entry.RQ)
 	}
 
-	data, err := os.ReadFile(filepath.Join(s.cfg.DashcamDir, "blobs",
-		time.Now().Format("2006-01-02"), testFP, entry.T+".req.gz"))
-	if err != nil {
-		t.Fatalf("gz blob 缺失: %v", err)
+	// D-P5：gzip 的 payload 在段记录里，每条独立压缩（gzip 往返校验）
+	reqData, resData, flags := readPackRecord(t, s.cfg.DashcamDir, testFP, rec.start.Format("2006-01-02"), entry)
+	if flags&packFlagReqGz == 0 || flags&packFlagResGz != 0 {
+		t.Fatalf("flags 应只标记 req gzip: %d", flags)
 	}
-	zr, err := gzip.NewReader(bytes.NewReader(data))
+	zr, err := gzip.NewReader(bytes.NewReader(reqData))
 	if err != nil {
 		t.Fatalf("不是合法 gzip: %v", err)
 	}
 	roundtrip, err := io.ReadAll(zr)
 	if err != nil || !bytes.Equal(roundtrip, big) {
 		t.Fatalf("gzip 往返不一致: err=%v len=%d", err, len(roundtrip))
+	}
+	if string(resData) != "tiny" {
+		t.Fatalf("未压缩 payload 应原样保存: %q", resData)
 	}
 }
 
@@ -333,34 +345,6 @@ func TestGracefulShutdownDrains(t *testing.T) {
 	}
 	// 幂等：重复 closeAndWait 不 panic（主流程与测试 cleanup 双重调用）
 	s.closeAndWait()
-}
-
-func TestTraceConflictHandledInWorker(t *testing.T) {
-	// trace 冲突处理在 worker 执行：跨重启的 .tmp 残留（崩溃产物）同样触发换名
-	s := newTestSink(t, nil)
-	fpDir := filepath.Join(s.cfg.DashcamDir, "blobs", time.Now().Format("2006-01-02"), testFP)
-	if err := os.MkdirAll(fpDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	leftover := filepath.Join(fpDir, "0123456789abcdef.req.tmp")
-	if err := os.WriteFile(leftover, []byte("stale"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-
-	rec := s.begin(testCaptureRequest(t, "0123456789abcdef"), testFP)
-	rec.writeRequest([]byte("fresh"))
-	rec.finish("")
-
-	entry := parseIndexEntry(t, waitIndexLines(t, s.cfg.DashcamDir, 1)[0])
-	if entry.T == "0123456789abcdef" || !strings.HasPrefix(entry.T, "0123456789abcdef-") {
-		t.Fatalf("冲突应追加 -<6位随机> 后缀: %q", entry.T)
-	}
-	if _, err := os.Stat(filepath.Join(fpDir, entry.T+".req")); err != nil {
-		t.Fatalf("换名后的 blob 不存在: %v", err)
-	}
-	if data, err := os.ReadFile(leftover); err != nil || string(data) != "stale" {
-		t.Fatalf("崩溃残留不应被覆盖: err=%v data=%q", err, data)
-	}
 }
 
 func TestServeHealthReportsDroppedAndBuffered(t *testing.T) {

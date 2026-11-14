@@ -63,7 +63,8 @@ $DASHCAM_DIR/
 ├─ blobs/
 │  └─ 2026-11-13/                 # 按天分目录：便于整目录清理与按日期定位
 │     └─ 6981744f7254/            # 调用方指纹：sha256(Authorization) 前 12 位
-│        ├─ <trace>.req[.gz]
+│        ├─ seg-09-00.pack        # 段式打包（D-P5）：多条记录顺序追加，见 §4.5
+│        ├─ <trace>.req[.gz]      # 旧布局（D-P5 之前的二进制所写），双路径读
 │        └─ <trace>.res[.gz]
 └─ index/
    └─ 2026-11-13.ndjson           # 当天索引，追加写
@@ -75,10 +76,11 @@ $DASHCAM_DIR/
 |---|---|---|
 | 日期目录 | 服务端本地时区 `YYYY-MM-DD` | 与运维习惯一致；跨时区部署需固定 `TZ` |
 | 调用方目录 | `sha256(Authorization)[:12]`，无凭据时为 `_anon` | 不可逆，不泄露密钥 |
-| 文件名 | `<trace>` | 优先取 `X-Trace-Id`，其次 `X-Request-Id`，均无则生成 32 位 hex |
-| trace 校验 | `^[A-Za-z0-9._-]{8,71}$` | 同时防路径穿越；冲突后缀（`-` + 6 位随机）会把长度推到 71 |
-| 冲突处理 | 追加 `-<6位随机>` 后缀 | 客户端复用同一 `X-Request-Id` 重试时 |
-| 扩展名 | `.req` / `.res`，压缩后追加 `.gz` | **不要按后缀猜测**，以索引 `qz` / `rz` 为准 |
+| 文件名（旧布局） | `<trace>` | 优先取 `X-Trace-Id`，其次 `X-Request-Id`，均无则生成 32 位 hex |
+| trace 校验 | `^[A-Za-z0-9._-]{8,71}$` | 同时防路径穿越 |
+| 段文件名（D-P5） | `seg-<HH>-<seq>.pack` | HH 为记录所属小时，seq 当天接续递增；达 32 MB 或跨小时滚动 |
+| 同日同名 trace | 索引出现两行同 `t` | 旧布局换名逻辑已随段化移除；详情接口按既有 `ambiguous_trace`(409) 处理 |
+| 扩展名（旧布局） | `.req` / `.res`，压缩后追加 `.gz` | **不要按后缀猜测**，以索引 `qz` / `rz` 为准 |
 
 ### 4.2 不使用 user_id 的原因
 
@@ -102,10 +104,27 @@ fp = sha256("Bearer sk-" + tokens.key)[:12]
 
 ### 4.3 原子性
 
-写入流程（flush worker 执行）：缓冲 → `<name>.req[.gz].tmp` → `rename` 到最终名。
-同目录 `rename` 在 POSIX 下原子，读取方不会看到半个文件。索引行在 `rename` 之后追加，避免索引指向不存在的文件。
+写入流程（flush worker 执行，D-P5 段式打包）：缓冲 → 追加进当日段文件（定长头 + payload）→ 追加索引。
+不再有 tmp 文件与 rename——**索引行只在整条记录写完后追加**，读取方永远看不到半条；
+写失败留下的段尾残条没有索引行，不可见，长度头保证可跳过（见 §4.5）。
 
 请求侧只有内存缓冲与非阻塞入队：预算超限拒收新请求、在途停缓冲（tr 位 + dropped）、队满丢弃——三层降级见 §3。
+
+### 4.5 段式打包（D-P5）
+
+布局 `blobs/<date>/<fp>/seg-<HH>-<seq>.pack`，多条记录顺序追加，文件数从 2N/天降到每天几十个段。记录格式（定长二进制头 + payload）：
+
+```text
+[magic 4B "DCPK"][reqLen 4B LE][resLen 4B LE][flags 2B LE][req payload][res payload]
+flags: bit0=req gzip(qz)  bit1=res gzip(rz)  bit2=req 截断  bit3=res 截断
+```
+
+- reqLen/resLen 是 payload 落盘字节数（gzip 后）；整条 = 14 + reqLen + resLen，段尾崩溃半条靠长度头跳过；
+- req/res 各自独立判定 gzip（阈值沿用 `GZIP_THRESHOLD`，`qz`/`rz` 语义与逐文件一致），段文件本身不压缩；
+- 段达 32 MB 或跨小时滚动；进程重启后从新段开始（不向崩溃残留的段尾追加），seq 从目录现有段接续；
+- 索引增加 `seg` / `off` / `ln`（off 指向记录头起点，ln = 整条字节数）；**无 `seg` 的旧行走旧的两文件路径，新旧并存**，不做任何数据迁移；
+- 读侧：1 次 open + 按需 pread（比旧布局 2 次 open 更少），按 flags 决定解压；
+- 清理不受影响：段文件位于日期目录内部，`clean-dashcam.sh` 整目录删除天然覆盖。
 
 ### 4.4 抽样状态（meta.json，D-P2）
 
@@ -140,6 +159,9 @@ fp = sha256("Bearer sk-" + tokens.key)[:12]
 | `k` | string | 会话键哈希（sha256(key) 前 16 位十六进制），无会话标识时省略 |
 | `pt` / `ct` | int | token 用量：输入 / 输出。采集时从响应正文 best-effort 提取（尾部窗口扫描 usage 对象，`dashcam/usage.go`），失败或旧版采集省略 |
 | `cc` / `cw` | int | token 用量：缓存命中输入 / 缓存写入。零值省略 |
+| `seg` | string | 段式打包（D-P5）：记录所在段文件名 `seg-<HH>-<seq>.pack`。**缺失 = 旧的两文件布局**（`<trace>.req[.gz]` / `.res[.gz]`），读取方按此选路径 |
+| `off` | int | 段内记录起始偏移（指向 14B 二进制头）。段内首条为 0，被 omitempty 略去，读取方缺省视为 0 |
+| `ln` | int | 段内整条记录字节数（14B 头 + req/res payload，gzip 后）；与头部声明的长度不一致 = 段损坏，按记录缺失处理 |
 
 示例：
 
@@ -187,11 +209,11 @@ SSE 必须压缩：不压缩时单日可达数百 MB，压缩后回到数十 MB 
 
 | 项 | 数量 |
 |---|---|
-| 每请求文件 | 2（`.req` + `.res`） |
-| 每天文件 | 约 1.1 万 |
-| 每年文件 | 约 400 万 |
+| 每请求文件（旧布局） | 2（`.req` + `.res`） |
+| 每请求文件（D-P5 段式） | ≈0（追加进当日段，每天几十个段/调用方目录） |
+| 每天文件 | 旧布局约 1.1 万；段式后为每天几十个段 |
 
-必须配置保留策略，否则 inode 与目录遍历都会劣化。建议按日期目录删除，保留 90 天（约 100 万文件）。清理脚本 `dashcam/clean-dashcam.sh` 已随发布包提供（D-P1，部署见 [03-deployment.md](03-deployment.md) §7）：默认 90 天、`0` 禁用、默认 dry-run、显式 `--confirm` 才删除。
+必须配置保留策略，否则 inode 与目录遍历都会劣化。建议按日期目录删除，保留 90 天。清理脚本 `dashcam/clean-dashcam.sh` 已随发布包提供（D-P1，部署见 [03-deployment.md](03-deployment.md) §7）：默认 90 天、`0` 禁用、默认 dry-run、显式 `--confirm` 才删除；段式打包文件位于日期目录内部，整目录删除天然覆盖。
 
 ## 7. 看板读取侧（已实现）
 
@@ -231,11 +253,13 @@ SSE 必须压缩：不压缩时单日可达数百 MB，压缩后回到数十 MB 
 
 ```text
 用户选择 → 指纹目录 → index/<date>.ndjson 过滤 u → trace 列表（含 m/s/ms/ft）
-        → 点击某条 → blobs/<date>/<u>/<trace>.req[.gz] + .res[.gz]
+        → 点击某条 → 索引行带 seg？
+           ├─ 是：blobs/<date>/<u>/<seg> 1 次 open + 按需 pread（D-P5 段式）
+           └─ 否：blobs/<date>/<u>/<trace>.req[.gz] + .res[.gz]（旧布局）
         → 归一化 → 渲染
 ```
 
-列表页只读索引，不打开 blob；详情页才解压正文。按 `qz` / `rz` 决定是否 gunzip；标记与实际文件不符（索引先于 rename 完成的极小窗口）时回退试另一后缀。
+列表页只读索引，不打开 blob；详情页才解压正文。旧布局按 `qz` / `rz` 决定是否 gunzip，标记与实际文件不符（索引先于 rename 完成的极小窗口）时回退试另一后缀；段式按记录头 flags 决定解压，头部不符 / `ln` 与索引不一致 / payload 被截断一律按记录缺失处理。
 
 ### 7.3 检索边界
 

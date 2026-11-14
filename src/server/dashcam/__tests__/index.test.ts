@@ -275,3 +275,41 @@ describe("scanThread", () => {
     await expect(scanThread({ ...base(), sessionKey: "NOT-A-KEY" })).rejects.toThrow();
   });
 });
+
+describe("parseIndexLine 段式打包字段（D-P5）", () => {
+  it("带 seg/off/ln 的行走段路径", () => {
+    const parsed = parseIndexLine(
+      entry(T1, FP_A, "2026-11-13T09:00:00+08:00", {
+        seg: "seg-09-00.pack",
+        off: 0,
+        ln: 314,
+      }),
+    );
+    expect(parsed?.seg).toBe("seg-09-00.pack");
+    expect(parsed?.off).toBe(0);
+    expect(parsed?.ln).toBe(314);
+  });
+
+  it("off 缺省视为 0（段内首条被采集端 omitempty 略去）", () => {
+    const parsed = parseIndexLine(
+      entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { seg: "seg-09-00.pack", ln: 100 }),
+    );
+    expect(parsed?.seg).toBe("seg-09-00.pack");
+    expect(parsed?.off).toBe(0);
+  });
+
+  it("seg 名不合法的行按旧布局回退（不携带段字段）", () => {
+    const parsed = parseIndexLine(
+      entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { seg: "../evil.pack", off: 1, ln: 2 }),
+    );
+    expect(parsed?.seg).toBeUndefined();
+    expect(parsed?.off).toBeUndefined();
+    expect(parsed?.ln).toBeUndefined();
+  });
+
+  it("无 seg 的旧行不携带段字段", () => {
+    const parsed = parseIndexLine(entry(T1, FP_A, "2026-11-13T09:00:00+08:00"));
+    expect(parsed?.seg).toBeUndefined();
+    expect(parsed?.off).toBeUndefined();
+  });
+});

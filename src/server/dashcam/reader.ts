@@ -1,21 +1,37 @@
 /**
- * blob 读取：按索引的 `qz` / `rz` 决定是否解压，**不猜后缀**。
+ * blob 读取：按索引决定路径与解压，**不猜后缀**。
+ *
+ * 双路径（D-P5）：
+ * - `seg` 存在 → 段式打包（`blobs/<date>/<fp>/<seg>`，1 次 open + 按需 pread）：
+ *   14B 定长头 `[magic "DCPK"][reqLen 4B LE][resLen 4B LE][flags 2B LE]` +
+ *   req||res payload，flags bit0/bit1 = req/res gzip；
+ * - `seg` 缺失 → 旧的两文件布局（`<trace>.req[.gz]` / `.res[.gz]`），按 `qz`/`rz` 解压。
  *
  * 上限：`DASHCAM_MAX_BLOB_BYTES`（默认 16 MiB，解压后）为硬顶。采集侧上限是 128 MiB，
  * 直接整段读入 + `JSON.parse` 会让单次请求吃掉数百 MB 内存，故读取层先截断再交给归一化。
  *
- * 兼容：索引在 rename 之后追加，理论上有极小窗口出现标记与实际文件不符，
+ * 兼容：旧布局在 rename 之后追加索引，理论上有极小窗口出现标记与实际文件不符，
  * 因此标记为 `.gz` 但文件不存在、或解压失败时，回退试一次另一后缀。
+ * 段记录损坏（头部不符 / ln 与索引不一致 / 被截断）一律按 missing 处理——
+ * 崩溃半条不会有索引行，能被索引引用到的记录必然完整。
  */
 import { open } from "node:fs/promises";
 import { createGunzip } from "node:zlib";
 
-import { dashcamBlobPath } from "./paths";
+import { dashcamBlobPath, dashcamPackPath } from "./paths";
 
 /** 默认单文件读取上限（解压后）。 */
 export const DEFAULT_MAX_BLOB_BYTES = 16 * 1024 * 1024;
 /** 与采集侧 `MAX_REQUEST_BYTES` 对齐的硬上限。 */
 export const HARD_MAX_BLOB_BYTES = 128 * 1024 * 1024;
+
+/** 段记录定长头：`[magic 4B][reqLen 4B LE][resLen 4B LE][flags 2B LE]`。 */
+export const PACK_HEADER_BYTES = 14;
+/** 段记录 magic（与 dashcam/pack.go 的 packMagic 一致）。 */
+export const PACK_MAGIC = "DCPK";
+/** flags bit0/bit1 = req/res gzip（与 packFlagReqGz/packFlagResGz 一致）。 */
+const PACK_FLAG_REQ_GZ = 1 << 0;
+const PACK_FLAG_RES_GZ = 1 << 1;
 
 export class DashcamBlobMissingError extends Error {
   readonly code = "not_found";
@@ -26,6 +42,16 @@ export class DashcamBlobMissingError extends Error {
   }
 }
 
+/** 索引 seg/off/ln 的段定位信息（D-P5）；缺失 = 旧的两文件布局。 */
+export interface ReadBlobSeg {
+  /** 段文件名（`seg-<HH>-<seq>.pack`，已由索引解析层按白名单校验） */
+  name: string;
+  /** 记录头在段文件内的偏移（字节） */
+  off: number;
+  /** 整条记录字节数（头 + payload）；缺失时由头部校验推导 */
+  ln?: number;
+}
+
 export interface ReadBlobInput {
   dir: string;
   date: string;
@@ -33,6 +59,8 @@ export interface ReadBlobInput {
   trace: string;
   kind: "req" | "res";
   gzip: boolean;
+  /** 段式打包定位（D-P5）；给出时走段路径，忽略 trace/gzip 后缀猜测 */
+  seg?: ReadBlobSeg;
 }
 
 export interface ReadBlobResult {
@@ -121,9 +149,12 @@ function isMissing(error: unknown): boolean {
 
 /**
  * 读取一次请求的 req 或 res 正文。
- * `gzip` 来自索引的 `qz` / `rz`；标记与实际文件不符时自动回退一次。
+ * `seg` 存在走段路径；否则 `gzip` 来自索引的 `qz` / `rz`，标记与实际文件不符时自动回退一次。
  */
 export async function readDashcamBlob(input: ReadBlobInput): Promise<ReadBlobResult> {
+  if (input.seg !== undefined) {
+    return readFromPack(input, input.seg);
+  }
   const max = dashcamMaxBlobBytes();
   const candidates: boolean[] = input.gzip ? [true, false] : [false, true];
   let missing = true;
@@ -176,4 +207,73 @@ export async function readDashcamBlob(input: ReadBlobInput): Promise<ReadBlobRes
 
   if (missing) throw new DashcamBlobMissingError();
   throw lastError instanceof Error ? lastError : new DashcamBlobMissingError();
+}
+
+/**
+ * 段式打包读取（D-P5）：1 次 open，先 pread 定长头再按需 pread 目标侧 payload。
+ * 头部不符 / ln 与索引不一致 / payload 被截断（崩溃半条或段损坏）一律按 missing 处理。
+ */
+async function readFromPack(input: ReadBlobInput, seg: ReadBlobSeg): Promise<ReadBlobResult> {
+  const max = dashcamMaxBlobBytes();
+  const path = dashcamPackPath(input.dir, {
+    date: input.date,
+    fp: input.fp,
+    seg: seg.name,
+  });
+
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, "r");
+  } catch (error) {
+    // 段已被清理 / 从未存在：与旧布局的 missing 语义一致（路由映射 404）
+    if (isMissing(error)) throw new DashcamBlobMissingError();
+    throw error;
+  }
+  try {
+    const head = Buffer.alloc(PACK_HEADER_BYTES);
+    const headRead = await handle.read(head, 0, PACK_HEADER_BYTES, seg.off);
+    if (
+      headRead.bytesRead < PACK_HEADER_BYTES ||
+      head.toString("latin1", 0, 4) !== PACK_MAGIC
+    ) {
+      throw new DashcamBlobMissingError("段记录头部损坏");
+    }
+    const reqLen = head.readUInt32LE(4);
+    const resLen = head.readUInt32LE(8);
+    const flags = head.readUInt16LE(12);
+    if (seg.ln !== undefined && seg.ln !== PACK_HEADER_BYTES + reqLen + resLen) {
+      throw new DashcamBlobMissingError("段记录与索引长度不一致");
+    }
+
+    const isReq = input.kind === "req";
+    const diskLen = isReq ? reqLen : resLen;
+    const gz = (flags & (isReq ? PACK_FLAG_REQ_GZ : PACK_FLAG_RES_GZ)) !== 0;
+    const sliceOff = seg.off + PACK_HEADER_BYTES + (isReq ? 0 : reqLen);
+    const wanted = Math.min(diskLen, max);
+    const buffer = Buffer.alloc(wanted);
+    const { bytesRead } = await handle.read(buffer, 0, wanted, sliceOff);
+    if (bytesRead < wanted) {
+      throw new DashcamBlobMissingError("段记录被截断");
+    }
+    const slice = buffer.subarray(0, bytesRead);
+    const capped = diskLen > wanted;
+
+    if (!gz) {
+      return {
+        text: slice.toString("utf8"),
+        bytes: slice.length,
+        gzip: false,
+        capped,
+      };
+    }
+    const decoded = await gunzipCapped(slice, max);
+    return {
+      text: decoded.text,
+      bytes: Buffer.byteLength(decoded.text, "utf8"),
+      gzip: true,
+      capped: decoded.capped || capped,
+    };
+  } finally {
+    await handle.close();
+  }
 }

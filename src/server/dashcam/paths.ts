@@ -20,6 +20,9 @@ export const TRACE_PATTERN = /^[A-Za-z0-9._-]{8,71}$/;
 /** 指纹：12 位小写 hex，或代理在无凭据时写的 `_anon`。 */
 export const FINGERPRINT_PATTERN = /^(?:[0-9a-f]{12}|_anon)$/;
 
+/** 段式打包（D-P5）段文件名：`seg-<HH>-<seq>.pack`，seq 至少两位（≥100 自然进位）。 */
+export const PACK_SEG_PATTERN = /^seg-\d{2}-\d{2,}\.pack$/;
+
 /** 日期目录 / 索引文件名。 */
 export const DASHCAM_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -129,6 +132,21 @@ export function dashcamBlobPath(dir: string, input: BlobPathInput): string {
   if (!TRACE_PATTERN.test(trace)) throw new DashcamPathError("非法 trace id");
   const name = `${trace}.${kind}${gz ? ".gz" : ""}`;
   return assertInsideRoot(dir, join(dir, "blobs", date, fp, name));
+}
+
+export interface PackPathInput {
+  date: string;
+  fp: string;
+  seg: string;
+}
+
+/** `<root>/blobs/<date>/<fp>/<seg>`（D-P5 段式打包；seg 名经白名单校验防穿越）。 */
+export function dashcamPackPath(dir: string, input: PackPathInput): string {
+  const { date, fp, seg } = input;
+  if (!DASHCAM_DATE_PATTERN.test(date)) throw new DashcamPathError("非法索引日期");
+  if (!FINGERPRINT_PATTERN.test(fp)) throw new DashcamPathError("非法调用方指纹");
+  if (!PACK_SEG_PATTERN.test(seg)) throw new DashcamPathError("非法段文件名");
+  return assertInsideRoot(dir, join(dir, "blobs", date, fp, seg));
 }
 
 /* ------------------------------------------------------------------ */
