@@ -1,0 +1,1 @@
+{"id":"chatcmpl-demo","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"好的，先给结论。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1200,"completion_tokens":48,"total_tokens":1248,"prompt_tokens_details":{"cached_tokens":900}}}

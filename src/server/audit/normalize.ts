@@ -792,6 +792,7 @@ function parseAnthropicSse(events: SseEvent[]): ResponseParseResult {
   let done = false;
   let inputTokens: number | undefined;
   let cachedTokens: number | undefined;
+  let cacheWriteTokens: number | undefined;
 
   for (const event of events) {
     const parsed = parseJson(event.data);
@@ -806,6 +807,8 @@ function parseAnthropicSse(events: SseEvent[]): ResponseParseResult {
       if (startInput !== undefined) inputTokens = startInput;
       const startCached = asNumber(startUsage?.cache_read_input_tokens);
       if (startCached !== undefined) cachedTokens = startCached;
+      const startCacheWrite = asNumber(startUsage?.cache_creation_input_tokens);
+      if (startCacheWrite !== undefined) cacheWriteTokens = startCacheWrite;
       continue;
     }
     if (type === "content_block_start") {
@@ -842,6 +845,7 @@ function parseAnthropicSse(events: SseEvent[]): ResponseParseResult {
           completionTokens: deltaUsage,
           ...(inputTokens === undefined ? {} : { totalTokens: inputTokens + deltaUsage }),
           ...(cachedTokens === undefined ? {} : { cachedTokens }),
+          ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
         };
       }
       done = true;

@@ -122,8 +122,11 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     const scan = await scanSessions(scanInput);
-    // 当前页可见行才水合 token（预算 AUDIT_USAGE_HYDRATE_MAX，正文解析有 30s 缓存）
-    const usages = await hydrateSessionUsages(dir, scan.rows);
+    // token 首选索引字段（采集端提取）；旧数据没有字段才读时水合兜底
+    const usages = await hydrateSessionUsages(
+      dir,
+      scan.rows.filter((row) => row.usage === undefined),
+    );
     const data: AuditSessionList = {
       available: true,
       grouped: false,

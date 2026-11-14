@@ -11,7 +11,7 @@
 import { connection } from "next/server";
 
 import { AuditAmbiguousError, auditError, toAuditErrorResponse } from "@/server/audit/errors";
-import { entryEpochSeconds, readIndexDay } from "@/server/audit/index";
+import { entryEpochSeconds, readIndexDay, usageOfIndexEntry } from "@/server/audit/index";
 import { normalizeAudit, normalizeRequestMessages } from "@/server/audit/normalize";
 import { TRACE_PATTERN, auditDir, isAuditAvailable } from "@/server/audit/paths";
 import { parseDetailQuery } from "@/server/audit/query";
@@ -147,6 +147,12 @@ export async function GET(
       requestCapped: requestBlob.capped,
       responseCapped: responseBlob.capped,
     });
+    // token 以索引字段为准（采集端提取，是唯一权威来源，与列表/线程天然一致）；
+    // 旧数据索引无字段时保留正文解析结果
+    const indexUsage = usageOfIndexEntry(entry);
+    if (indexUsage !== undefined) {
+      envelope.response.usage = indexUsage;
+    }
 
     const rawMax = auditRawPreviewBytes();
     const rawRequest = preview(requestBlob.text, rawMax);
