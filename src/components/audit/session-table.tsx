@@ -8,6 +8,7 @@
  * - `request`：这一次调用的耗时/首字/大小 —— 排查单次异常。
  */
 import { StatusBadge, Tag } from "@/components/audit/badges";
+import { BytePair, BytePairHead } from "@/components/audit/byte-pair";
 import {
   Table,
   TableBody,
@@ -71,7 +72,9 @@ export function ConversationTable({
           <TableHead>模型</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="text-right">起止跨度</TableHead>
-          <TableHead className="text-right">请求 → 响应</TableHead>
+          <TableHead className="text-right">
+            <BytePairHead />
+          </TableHead>
           <TableHead className="w-6" />
         </TableRow>
       </TableHeader>
@@ -112,7 +115,10 @@ export function ConversationTable({
               {row.requestCount > 1 ? formatDuration(row.lastEpoch - row.firstEpoch) : "—"}
             </TableCell>
             <TableCell className="text-right tabular-nums">
-              {formatBytes(row.totalRequestBytes)} → {formatBytes(row.totalResponseBytes)}
+              <BytePair
+                request={formatBytes(row.totalRequestBytes)}
+                response={formatBytes(row.totalResponseBytes)}
+              />
             </TableCell>
             <TableCell className="text-muted-foreground">›</TableCell>
           </TableRow>
@@ -141,7 +147,9 @@ export function RequestTable({
             会话键
           </TableHead>
           <TableHead className="text-right">耗时 / 首字</TableHead>
-          <TableHead className="text-right">请求 → 响应</TableHead>
+          <TableHead className="text-right">
+            <BytePairHead />
+          </TableHead>
           <TableHead className="w-6" />
         </TableRow>
       </TableHeader>
@@ -184,7 +192,10 @@ export function RequestTable({
               </span>
             </TableCell>
             <TableCell className="text-right tabular-nums">
-              {formatBytes(row.requestBytes)} → {formatBytes(row.responseBytes)}
+              <BytePair
+                request={formatBytes(row.requestBytes)}
+                response={formatBytes(row.responseBytes)}
+              />
             </TableCell>
             <TableCell className="text-muted-foreground">›</TableCell>
           </TableRow>
