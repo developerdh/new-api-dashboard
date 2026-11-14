@@ -64,6 +64,18 @@ export interface DashcamIndexEntry {
   ct?: number;
   cc?: number;
   cw?: number;
+  /**
+   * 段式打包（D-P5，`seg-<HH>-<seq>.pack`）：记录所在段文件名。
+   * 缺失 = 旧的两文件布局（`<trace>.req[.gz]` / `.res[.gz]`），读取方按此选路径。
+   */
+  seg?: string;
+  /**
+   * 段内记录起始偏移（指向 14B 二进制头）。采集端 omitempty 会略去段内首条的 0，
+   * 读取方缺省视为 0；其余值缺失或非法时该行按旧布局回退。
+   */
+  off?: number;
+  /** 段内整条记录字节数（14B 头 + req/res payload，gzip 后）。 */
+  ln?: number;
 }
 
 /**

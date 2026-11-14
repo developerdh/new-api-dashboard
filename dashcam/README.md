@@ -31,7 +31,8 @@ $DASHCAM_DIR/
 ├─ blobs/
 │  └─ 2026-11-13/              # 按天分目录，便于整目录清理
 │     └─ 3f9a1c7b22d4/         # token 指纹（sha256 前 12 位），等价于调用方维度
-│        ├─ <trace>.req[.gz]
+│        ├─ seg-09-00.pack     # 段式打包：多条记录顺序追加（D-P5）
+│        ├─ <trace>.req[.gz]   # 旧布局（旧版二进制所写），看板双路径兼容
 │        └─ <trace>.res[.gz]
 └─ index/
    └─ 2026-11-13.ndjson        # 当天索引，追加写
@@ -40,8 +41,9 @@ $DASHCAM_DIR/
 说明：
 
 - 代理**拿不到 user_id**（new-api 不透传），因此用 `sha256(Authorization)` 前 12 位作为调用方维度。看板读取时用该指纹反查 token → user。
-- 文件名固定为 `<trace>.req` / `<trace>.res`，是否带 `.gz` 由索引里的 `qz` / `rz` 决定，不要猜。
-- 落盘/压缩/索引由后台 worker 执行（转发路径只做内存缓冲 + 入队），大文件 gzip 在 worker 一次直达。
+- 段式打包（D-P5）：一条记录 = `[magic "DCPK"][reqLen][resLen][flags]` + req||res payload，索引带 `seg`/`off`/`ln` 定位；req/res 各自按 `GZIP_THRESHOLD` 独立判定压缩；段达 32 MB 或跨小时滚动。
+- 旧布局（`<trace>.req[.gz]` / `.res[.gz]`）由旧版二进制所写，索引无 `seg` 字段，看板按旧行读取，不做数据迁移。
+- 落盘/压缩/索引由后台 worker 执行（转发路径只做内存缓冲 + 入队），gzip 在 worker 内存直达。
 
 ### 索引行
 
@@ -66,6 +68,7 @@ $DASHCAM_DIR/
 | `k` | 会话键哈希（sha256(key) 前 16 位十六进制）；无会话标识时省略 |
 | `pt` / `ct` | token 用量：输入 / 输出（采集时从响应正文尾部 best-effort 提取，`usage.go`）；失败或旧版省略 |
 | `cc` / `cw` | token 用量：缓存命中输入 / 缓存写入。零值省略 |
+| `seg` / `off` / `ln` | 段式打包定位（D-P5）：段文件名 / 记录头偏移 / 整条字节数；`seg` 缺失 = 旧两文件布局 |
 
 token 提取的解析口径与看板侧（`src/server/dashcam/normalize.ts`）保持一致：
 
@@ -190,7 +193,7 @@ location /v1/ {
     proxy_set_header X-Trace-Id $request_id;
 
     proxy_next_upstream error timeout http_502 http_503 http_504;
-    proxy_request_buffering on;   # 重试需要；默认即开
+    proxy_request_buffering on;   # 缓冲请求体便于代理完整读取；POST 重试语义由 non_idempotent 缺省规则决定
 
     proxy_buffering off;          # SSE 必须有
     proxy_read_timeout 600s;
@@ -253,6 +256,6 @@ systemctl stop new-api-dashcam && curl -sI https://<你的域名>/v1/models
 
 ## 已知限制
 
-- 一次请求落两个文件 + 一行索引。日均 5 千请求约 1.1 万文件/天，按日期目录清理（`clean-dashcam.sh`，见上文「清理」）。
+- 一次请求 = 一行索引 + 一条段记录（D-P5 段式打包，文件数从 2 万/天降到每天几十个段）。按日期目录清理（`clean-dashcam.sh`，见上文「清理」）。
 - 索引按天切分，跨天查询要读多个文件。
 - 客户端断开时可能只落盘半截响应，靠索引 `tr` 位区分截断与正常结束。

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -47,6 +46,12 @@ type indexEntry struct {
 	CT int64 `json:"ct,omitempty"`
 	CC int64 `json:"cc,omitempty"`
 	CW int64 `json:"cw,omitempty"`
+	// 段式打包（D-P5）：seg/off/ln 定位 blobs/<date>/<fp>/<seg> 段内记录。
+	// seg 缺失 = 旧的两文件布局（新旧并存，读取方按 seg 是否存在选路径）；
+	// off=0（段内首条）被 omitempty 略去，读取方缺省视为 0。
+	SEG string `json:"seg,omitempty"`
+	OFF int64  `json:"off,omitempty"`
+	LN  int64  `json:"ln,omitempty"`
 }
 
 const (
@@ -95,6 +100,12 @@ type sink struct {
 	idxMu    sync.Mutex
 	idxFiles map[string]*os.File
 
+	// 段式打包（D-P5）：packs 是 (day/fp) → 当前打开段；packSeq 记录每键的下一个序号。
+	// 只有 flush worker 触碰，packMu 互斥（见 pack.go）。
+	packMu  sync.Mutex
+	packs   map[string]*packSeg
+	packSeq map[string]int
+
 	dirMu    sync.Mutex
 	knownDir map[string]struct{}
 
@@ -113,6 +124,8 @@ func newSink(cfg config, counters *captureCounters) (*sink, error) {
 		counters: counters,
 		queue:    make(chan *record, cfg.QueueCap),
 		idxFiles: make(map[string]*os.File),
+		packs:    make(map[string]*packSeg),
+		packSeq:  make(map[string]int),
 		knownDir: make(map[string]struct{}),
 	}
 	for range cfg.FlushWorkers {
@@ -135,11 +148,18 @@ func (s *sink) closeAndWait() {
 	s.closeOnce.Do(func() { close(s.queue) })
 	s.workers.Wait()
 	s.idxMu.Lock()
-	defer s.idxMu.Unlock()
 	for name, f := range s.idxFiles {
 		f.Close()
 		delete(s.idxFiles, name)
 	}
+	s.idxMu.Unlock()
+	// 段文件随 worker 排空自然收尾；这里兜底关闭（幂等：packSeg.close 可重复调用）
+	s.packMu.Lock()
+	for key, seg := range s.packs {
+		seg.close()
+		delete(s.packs, key)
+	}
+	s.packMu.Unlock()
 }
 
 // record 是一次请求的采集快照。缓冲只发生在转发 goroutine（纯内存 append），
@@ -299,9 +319,10 @@ func (r *record) finish(errMsg string) {
 	}
 }
 
-// flush 把一条记录持久化：ensureDir → O_EXCL 定名 → 缓冲写盘（含 gzip 阈值判定）→
-// 正则提取 → usage 提取 → 追加索引。失败保留 .tmp 由清理脚本回收，failed++，不重试
-// （磁盘持续故障时重试会阻塞 worker）。不变式：索引行存在 ⇒ blob 已 rename 就位。
+// flush 把一条记录持久化：ensureDir → 段式追加（D-P5，定长头 + req||res payload，
+// gzip 阈值判定在 payload 层）→ 正则提取 → usage 提取 → 追加索引。
+// 失败保留残段（无索引行，读取方不可见），failed++，不重试（磁盘持续故障时重试会
+// 阻塞 worker）。不变式：索引行存在 ⇒ 整条记录已写完落盘。
 func (s *sink) flush(rec *record) {
 	if s.flushHook != nil {
 		s.flushHook(rec)
@@ -316,44 +337,7 @@ func (s *sink) flush(rec *record) {
 		return
 	}
 
-	// trace 可能被客户端复用（同一个 X-Request-Id 重试）：冲突时换后缀，保证
-	// 文件名与最终路径始终一致——否则 rename 会落到另一个名字上。
-	// O_EXCL 候选循环从请求路径搬到 worker：跨重启的 .tmp 残留（崩溃产物）同样在此覆盖。
-	var base string
-	for attempt := 0; attempt < 3 && base == ""; attempt++ {
-		candidate := rec.trace
-		if attempt > 0 {
-			candidate = rec.trace + "-" + randomHex(3)
-		}
-		candidateBase := filepath.Join(dir, candidate)
-		rf, ok := createExclusive(candidateBase + ".req.tmp")
-		if !ok {
-			continue
-		}
-		sf, ok := createExclusive(candidateBase + ".res.tmp")
-		if !ok {
-			rf.Close()
-			os.Remove(candidateBase + ".req.tmp")
-			continue
-		}
-		rf.Close()
-		sf.Close()
-		base = candidateBase
-		rec.trace = candidate
-	}
-	if base == "" {
-		s.counters.failed.Add(1)
-		logEvent("warn", "capture_name_failed", map[string]any{"trace": rec.trace})
-		return
-	}
-
-	reqGz, ok := s.flushBlob(base, ".req", rec.reqBuf)
-	if !ok {
-		s.counters.failed.Add(1)
-		logEvent("warn", "capture_write_failed", map[string]any{"trace": rec.trace})
-		return
-	}
-	resGz, ok := s.flushBlob(base, ".res", rec.resBuf)
+	segName, off, ln, reqGz, resGz, ok := s.appendPack(rec, dir, day)
 	if !ok {
 		s.counters.failed.Add(1)
 		logEvent("warn", "capture_write_failed", map[string]any{"trace": rec.trace})
@@ -381,12 +365,16 @@ func (s *sink) flush(rec *record) {
 		MS: rec.ms,
 		RQ: int64(len(rec.reqBuf)),
 		RS: int64(len(rec.resBuf)),
-		QZ: reqGz,
-		RZ: resGz,
 		TR: rec.trunc,
 		E:  rec.errMsg,
 		IP: rec.ip,
 		K:  sessionKeyHash(rec.sessionKey),
+		// 段式打包（D-P5）：索引行带 seg/off/ln；qz/rz 由 packPayload 的独立判定给出
+		QZ:  reqGz,
+		RZ:  resGz,
+		SEG: segName,
+		OFF: off,
+		LN:  ln,
 	}
 	if !rec.firstByte.IsZero() {
 		entry.FT = rec.firstByte.Sub(rec.start).Milliseconds()
@@ -398,59 +386,6 @@ func (s *sink) flush(rec *record) {
 		entry.CW = usage.cacheWrite
 	}
 	s.appendIndex(rec.start, entry)
-}
-
-// flushBlob 把一个正文缓冲写到最终 blob：≥GZIP_THRESHOLD 走 gzip（内存 → gz.tmp
-// 一次直达，结构上消灭旧 finish() 的"读 tmp + 压缩 + 删 tmp"三次 I/O），否则裸写。
-// 返回（是否 gzip，是否成功）。gzip 失败降级为裸写——qz/rz 只在真正压缩时为 true，
-// 与旧 compressIfNeeded 语义一致。
-func (s *sink) flushBlob(base, ext string, buf []byte) (bool, bool) {
-	finalPath := base + ext
-	if s.cfg.GzipOver > 0 && int64(len(buf)) >= s.cfg.GzipOver {
-		gzTmp := finalPath + ".gz.tmp"
-		if err := writeGzipFile(gzTmp, buf); err == nil {
-			if err := os.Rename(gzTmp, finalPath+".gz"); err == nil {
-				os.Remove(finalPath + ".tmp") // O_EXCL 预留的裸 tmp 不再需要
-				return true, true
-			}
-			os.Remove(gzTmp)
-		} else {
-			os.Remove(gzTmp)
-		}
-	}
-	tmpPath := finalPath + ".tmp"
-	if err := os.WriteFile(tmpPath, buf, 0o640); err != nil {
-		return false, false
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		return false, false
-	}
-	return false, true
-}
-
-func writeGzipFile(path string, buf []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
-	if err != nil {
-		return err
-	}
-	zw := gzip.NewWriter(f)
-	if _, err := zw.Write(buf); err != nil {
-		f.Close()
-		return err
-	}
-	if err := zw.Close(); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
-}
-
-func createExclusive(path string) (*os.File, bool) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
-	if err != nil {
-		return nil, false
-	}
-	return f, true
 }
 
 // appendIndex 单次 write 追加整行：O_APPEND 下写 < PIPE_BUF 是原子的，

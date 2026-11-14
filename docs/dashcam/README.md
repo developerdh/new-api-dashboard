@@ -36,7 +36,7 @@ New API 自身不保存请求的提示词与模型返回，看板无法做内容
 | 过期数据清理（clean-dashcam.sh，D-P1） | 已实现（2026-11-14） | `dashcam/clean-dashcam.sh`、[03-deployment.md](03-deployment.md) §7 |
 | 落盘异步化 + 资源围栏（D-P3） | 已实现（2026-11-14） | `dashcam/capture.go`（sink/worker/预算）、`dashcam/main.go`（healthz/背板） |
 | 按调用方比例抽样（D-P2） | 已实现（2026-11-14） | `dashcam/config.go`（`sampled`）、`dashcam/capture.go`（meta.json）、`src/server/dashcam/meta.ts` |
-| 段式打包（D-P5） | **未实现（已裁决）** | 规划见 [06-performance-plan.md](06-performance-plan.md) §13 |
+| 段式打包（D-P5） | 已实现（2026-11-14） | `dashcam/pack.go`（写侧）、`src/server/dashcam/reader.ts`（双路径读） |
 
 ## 一句话架构
 

@@ -15,9 +15,19 @@ import { entryEpochSeconds, readIndexDay, usageOfIndexEntry } from "@/server/das
 import { normalizeDashcam, normalizeRequestMessages } from "@/server/dashcam/normalize";
 import { TRACE_PATTERN, dashcamDir, isDashcamAvailable } from "@/server/dashcam/paths";
 import { parseDetailQuery } from "@/server/dashcam/query";
-import { DashcamBlobMissingError, dashcamRawPreviewBytes, readDashcamBlob } from "@/server/dashcam/reader";
+import {
+  DashcamBlobMissingError,
+  dashcamRawPreviewBytes,
+  readDashcamBlob,
+  type ReadBlobSeg,
+} from "@/server/dashcam/reader";
 import { computeThreadDelta } from "@/server/dashcam/thread";
-import type { DashcamBlock, DashcamSessionDetail, DashcamThreadDelta } from "@/server/dashcam/types";
+import type {
+  DashcamBlock,
+  DashcamIndexEntry,
+  DashcamSessionDetail,
+  DashcamThreadDelta,
+} from "@/server/dashcam/types";
 import { ok } from "@/server/http";
 import { fingerprintsOfUser, loadTokenFingerprints } from "@/server/queries/dashcam-tokens";
 
@@ -26,6 +36,19 @@ function preview(text: string, maxBytes: number): { text: string; truncated: boo
   const buffer = Buffer.from(text, "utf8");
   if (buffer.length <= maxBytes) return { text, truncated: false };
   return { text: buffer.subarray(0, maxBytes).toString("utf8"), truncated: true };
+}
+
+/** 索引 → 段定位参数（D-P5）；旧布局行（无 seg）不带该字段，读取方走两文件路径。 */
+function blobSegOf(entry: DashcamIndexEntry): { seg: ReadBlobSeg } | Record<string, never> {
+  return entry.seg === undefined
+    ? {}
+    : {
+        seg: {
+          name: entry.seg,
+          off: entry.off ?? 0,
+          ...(entry.ln === undefined ? {} : { ln: entry.ln }),
+        },
+      };
 }
 
 /**
@@ -59,6 +82,7 @@ async function resolvePrevMessages(input: {
       trace: entry.t,
       kind: "req",
       gzip: entry.qz,
+      ...blobSegOf(entry),
     });
   } catch {
     return { parseFailed: false }; // 已被清理：降级为「展示全部上下文」
@@ -127,6 +151,7 @@ export async function GET(
         trace: entry.t,
         kind: "req",
         gzip: entry.qz,
+        ...blobSegOf(entry),
       }),
       readDashcamBlob({
         dir,
@@ -135,6 +160,7 @@ export async function GET(
         trace: entry.t,
         kind: "res",
         gzip: entry.rz,
+        ...blobSegOf(entry),
       }),
     ]);
 

@@ -18,6 +18,7 @@ import {
   DASHCAM_DATE_PATTERN,
   DashcamQueryError,
   FINGERPRINT_PATTERN,
+  PACK_SEG_PATTERN,
   TRACE_PATTERN,
   dashcamIndexPath,
   listIndexDates,
@@ -91,6 +92,13 @@ function optionalPositiveInt(value: unknown): number | undefined {
   return Math.trunc(numeric);
 }
 
+/** 段定位字段（off 允许 0，段内首条）：缺失 / 非法 / 负数都视为缺省。 */
+function optionalNonNegativeInt(value: unknown): number | undefined {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return undefined;
+  return Math.trunc(numeric);
+}
+
 /**
  * 索引条目 → usage。采集端（dashcam/usage.go）落盘时已提取，是**唯一权威来源**；
  * 返回 undefined 表示索引没有该字段（旧数据），调用方才走读时水合兜底。
@@ -137,6 +145,11 @@ export function parseIndexLine(line: string): DashcamIndexEntry | null {
   if (!FINGERPRINT_PATTERN.test(fp)) return null;
   if (startedAt === "" || Number.isNaN(Date.parse(startedAt))) return null;
 
+  // 段式打包（D-P5）：seg 名合法才走段路径；off 缺省 0（段内首条被采集端 omitempty 略去）。
+  // seg 缺失 / 名字非法 → 按旧的两文件布局回退。
+  const seg = toText(record.seg);
+  const packed = PACK_SEG_PATTERN.test(seg);
+
   return {
     t: trace,
     u: fp,
@@ -159,6 +172,10 @@ export function parseIndexLine(line: string): DashcamIndexEntry | null {
     ...(optionalPositiveInt(record.ct) === undefined ? {} : { ct: optionalPositiveInt(record.ct) }),
     ...(optionalPositiveInt(record.cc) === undefined ? {} : { cc: optionalPositiveInt(record.cc) }),
     ...(optionalPositiveInt(record.cw) === undefined ? {} : { cw: optionalPositiveInt(record.cw) }),
+    ...(packed ? { seg, off: optionalNonNegativeInt(record.off) ?? 0 } : {}),
+    ...(packed && optionalNonNegativeInt(record.ln) !== undefined
+      ? { ln: optionalNonNegativeInt(record.ln) }
+      : {}),
   };
 }
 

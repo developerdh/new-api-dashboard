@@ -21,6 +21,12 @@
   （拒收新请求 → 在途停缓冲 → 丢记录），`/healthz` 新增 `dropped` 与
   `buffered_bytes`；新增转发侧背板 `UPSTREAM_MAX_CONNS_PER_HOST` 与
   `IDLE_TIMEOUT`；磁盘格式零变化，新旧二进制可随时互换回滚。
+- **段式打包（D-P5）**：blob 写侧改为 `blobs/<date>/<fp>/seg-<HH>-<seq>.pack`
+  顺序追加（定长二进制头 + req/res payload，req/res 各自独立 gzip），去掉 tmp
+  文件与 rename，文件数从 2N/天降到每天几十个段；索引新增 `seg`/`off`/`ln`
+  定位字段，无 `seg` 的旧行走旧两文件路径，**新旧并存、不做数据迁移**；
+  崩溃只丢段尾半条（长度头可跳过，无索引行、不可见）；看板读取侧 1 次 open +
+  按需 pread。
 - **提示词与响应采集（new-api-dashcam）**：独立 Go 前置代理，把白名单对话接口的请求与响应原样落盘
   （按天 NDJSON 索引 + blob 文件），转发零第三方依赖，仅丢采集不丢调用。
   - 索引含模型、状态、耗时、截断位、会话键哈希（`k`）与 token 用量（`pt`/`ct`/`cc`/`cw`，
