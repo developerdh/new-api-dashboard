@@ -207,6 +207,19 @@ location /v1/ {
 | 上游不可达 | 返回 502 JSON | 有（与直连表现一致） |
 | 转发中途崩溃 | 该请求失败且无法重试 | 有（唯一残余风险） |
 
+## 清理
+
+数据只增不减，长期运行需配保留策略。随发布包提供 `clean-dashcam.sh`（默认 90 天，`DASHCAM_RETENTION_DAYS=0` 禁用）：
+
+```bash
+# dry-run：只打印待删清单，不删
+DASHCAM_DIR=/var/lib/new-api-dashboard/dashcam ./clean-dashcam.sh
+# 确认后实际删除
+DASHCAM_DIR=/var/lib/new-api-dashboard/dashcam ./clean-dashcam.sh --confirm
+```
+
+调度（systemd timer / cron）示例见 [`../docs/dashcam/03-deployment.md`](../docs/dashcam/03-deployment.md) §7；不部署脚本则维持现状（无清理）。
+
 ## 验证
 
 ```bash
@@ -228,6 +241,6 @@ systemctl stop new-api-dashcam && curl -sI https://<你的域名>/v1/models
 
 ## 已知限制
 
-- 一次请求落两个文件 + 一行索引。日均 5 千请求约 1.1 万文件/天，需配保留策略按日期目录清理。
+- 一次请求落两个文件 + 一行索引。日均 5 千请求约 1.1 万文件/天，按日期目录清理（`clean-dashcam.sh`，见上文「清理」）。
 - 索引按天切分，跨天查询要读多个文件。
 - 客户端断开时可能只落盘半截响应，靠索引 `tr` 位区分截断与正常结束。
