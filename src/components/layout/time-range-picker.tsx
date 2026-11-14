@@ -23,7 +23,7 @@ import {
   resolveRangeFromParams,
   type RangePreset,
 } from "@/lib/time-range";
-import { AuditDatePicker } from "@/components/audit/audit-date-picker";
+import { DashcamDatePicker } from "@/components/dashcam/dashcam-date-picker";
 import { cn } from "@/lib/utils";
 
 function dateInputToSeconds(value: string): number | null {
@@ -115,7 +115,7 @@ export function TimeRangePicker({ className }: { className?: string }) {
 
       <div className="flex items-center gap-1.5 text-sm">
         <CalendarDays className="size-4 text-muted-foreground" aria-hidden="true" />
-        <AuditDatePicker
+        <DashcamDatePicker
           value={customStart === "" ? null : customStart}
           onChange={(next) => setCustomStart(next ?? "")}
           max={customEnd === "" ? undefined : customEnd}
@@ -124,7 +124,7 @@ export function TimeRangePicker({ className }: { className?: string }) {
           ariaLabel="开始日期"
         />
         <span className="text-xs text-muted-foreground">至</span>
-        <AuditDatePicker
+        <DashcamDatePicker
           value={customEnd === "" ? null : customEnd}
           onChange={(next) => setCustomEnd(next ?? "")}
           min={customStart === "" ? undefined : customStart}

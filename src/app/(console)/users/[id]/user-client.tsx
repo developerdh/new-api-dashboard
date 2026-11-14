@@ -43,7 +43,7 @@ import type { UserOverviewSnapshot } from "@/server/queries/user";
 import type { TrendSeries } from "@/server/queries/trend";
 import type { UserModelRow, UserRecentRow } from "@/server/queries/user";
 
-import { AuditSessions } from "./audit-sessions";
+import { DashcamSessions } from "./dashcam-sessions";
 
 const HEATMAP_DAYS = 183;
 const RECENT_PAGE_SIZE = 10;
@@ -291,7 +291,7 @@ export function UserClient({ userId }: { userId: string }) {
         </div>
       </Card>
 
-      <AuditSessions
+      <DashcamSessions
         userId={userId}
         start={range.start}
         end={range.end}

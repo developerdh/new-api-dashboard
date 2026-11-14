@@ -221,7 +221,7 @@ pnpm config set node-linker hoisted --location project
 |---|---|---|
 | `Host` | `$http_host`（含端口） | 影响同源判定与生成的绝对链接；用 `$host` 会丢端口 |
 | `X-Forwarded-Proto` | `$scheme` | 会话 Cookie 不带 `Secure`；HTTPS 部署下不安全 |
-| `X-Forwarded-For` | `$proxy_add_x_forwarded_for` | 审计与限流拿不到真实来源 IP |
+| `X-Forwarded-For` | `$proxy_add_x_forwarded_for` | 监控与限流拿不到真实来源 IP |
 | `X-Forwarded-Host` | `$http_host` | 多级代理时对外主机名失真 |
 
 其他注意：

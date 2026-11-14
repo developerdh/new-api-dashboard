@@ -1,0 +1,99 @@
+/**
+ * GET /api/dashcam/conversations/[sessionKey] —— 一个会话键下的全部轮次（只读索引）。
+ *
+ * 为什么单独一个接口：会话列表只需要「有几轮、最后一句什么时候」，而线程视图
+ * 需要把轮次按时间排开。两者都只读索引，但排序方向和截断策略不同，
+ * 混在一个接口里会让分页语义变复杂。
+ *
+ * 安全链：
+ * 1. `sessionKey` 16 位小写十六进制（采集侧 `sha256(key)[:16]`）；
+ * 2. 会话键是**客户端自带**的（`prompt_cache_key` / Claude `metadata.user_id`），
+ *    知道键就能指定分组，因此必须叠加「指纹 ⊆ 该用户的 key 指纹集合」这一层，
+ *    否则越权可读；
+ * 3. 时间窗限制在 `DASHCAM_MAX_WINDOW_DAYS` 天内，避免一次扫全部索引。
+ *
+ * 本接口不打开任何 blob：首屏成本与列表同阶。轮次正文由
+ * `/api/dashcam/sessions/[traceId]?prev=…` 按需读取。
+ */
+import { connection } from "next/server";
+
+import { toDashcamErrorResponse } from "@/server/dashcam/errors";
+import { scanThread } from "@/server/dashcam/index";
+import { dashcamDir, dashcamMaxWindowDays, isDashcamAvailable } from "@/server/dashcam/paths";
+import { parseThreadQuery } from "@/server/dashcam/query";
+import { DashcamBlobMissingError } from "@/server/dashcam/reader";
+import { hydrateSessionUsages } from "@/server/dashcam/usage";
+import type { DashcamThread } from "@/server/dashcam/types";
+import { ok } from "@/server/http";
+import { fingerprintsOfUser, loadTokenFingerprints } from "@/server/queries/dashcam-tokens";
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ sessionKey: string }> },
+): Promise<Response> {
+  await connection();
+
+  try {
+    const { sessionKey: raw } = await context.params;
+    const query = parseThreadQuery(raw, new URL(request.url).searchParams);
+    const meta = {
+      range: { start: query.start, end: query.end },
+      granularity: null,
+      cached: false,
+      source: "dashcam-files",
+    } as const;
+
+    const dir = dashcamDir();
+    if (dir === null || !(await isDashcamAvailable(dir))) {
+      return toDashcamErrorResponse(new DashcamBlobMissingError());
+    }
+
+    const tokens = await loadTokenFingerprints();
+    const fingerprints = fingerprintsOfUser(tokens, query.userId);
+    if (!tokens.ok || fingerprints.size === 0) {
+      return toDashcamErrorResponse(new DashcamBlobMissingError());
+    }
+
+    const thread = await scanThread({
+      dir,
+      sessionKey: query.sessionKey,
+      fingerprints,
+      start: query.start,
+      end: query.end,
+      maxDays: dashcamMaxWindowDays(),
+    });
+
+    // 轮次 token 首选索引字段（采集端提取）；旧数据没有字段才读时水合兜底，
+    // 倒序传入让预算优先覆盖「最新的」轮次
+    const usages = await hydrateSessionUsages(
+      dir,
+      [...thread.turns]
+        .reverse()
+        .filter((turn) => turn.usage === undefined)
+        .map((turn) => ({
+        date: turn.date,
+        fp: turn.fingerprint,
+        traceId: turn.traceId,
+        path: turn.path,
+        responseTruncated: turn.responseTruncated,
+        gzip: turn.gzip,
+      })),
+    );
+    const data: DashcamThread = {
+      sessionKey: query.sessionKey,
+      fingerprints: thread.fingerprints,
+      turns: thread.turns.map((turn) => {
+        const usage = usages.get(`${turn.date}:${turn.fingerprint}:${turn.traceId}`);
+        return usage === undefined ? turn : { ...turn, usage };
+      }),
+      total: thread.total,
+      truncated: thread.truncated,
+      scannedDates: thread.scannedDates,
+    };
+    return ok(data, meta);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[dashcam/conversations] failed", message);
+    return toDashcamErrorResponse(error);
+  }
+}

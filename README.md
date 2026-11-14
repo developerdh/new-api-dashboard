@@ -17,7 +17,7 @@ New API 用户使用量统计看板。独立部署的 TypeScript 全栈应用：
 | 沉默用户 | 「上期活跃 · 本期沉默」清单：用户、最后活跃时间、上期请求数、详情入口 |
 | 模型分析 | 模型排行、多模型趋势、用户 × 模型交叉分布、单次请求平均成本 |
 | 用户详情 | 个人总览、使用趋势、模型分布、Token 占比、活跃热力图、最近使用记录 |
-| 会话查看 | 用户维度列出采集到的请求，展示提示词与模型返回（结构化 / 原始报文 / 事件流）；需部署 [audit-proxy](docs/audit-proxy/README.md) |
+| 会话查看 | 用户维度列出采集到的请求，展示提示词与模型返回（结构化 / 原始报文 / 事件流）；需部署 [new-api-dashcam](docs/dashcam/README.md) |
 | 导出 | 图表导出 HTML、数据导出 CSV、服务端整页快照 |
 
 ![用户详情](docs/images/user-detail.png)
@@ -70,9 +70,9 @@ docker compose --profile demo up -d --build
 | `DASHBOARD_AUTH_PASS` | 生产必填 | 登录密码 |
 | `DASHBOARD_SESSION_SECRET` | 多实例必填 | 会话签名密钥；留空时由登录凭据派生 |
 | `SNAPSHOT_DIR` | 否 | 快照目录，默认 `data/snapshots` |
-| `AUDIT_DIR` | 否 | 审计正文目录（audit-proxy 的 `AUDIT_DIR`，只读挂载）；留空则会话功能关闭 |
-| `AUDIT_TOKEN_HEADER_PREFIX` | 否 | 指纹重构前缀，默认 `Bearer sk-` |
-| `AUDIT_MAX_WINDOW_DAYS` / `AUDIT_MAX_BLOB_BYTES` / `AUDIT_RAW_PREVIEW_BYTES` | 否 | 会话查询保护：窗口 31 天、单文件 16 MiB、原文预览 256 KiB |
+| `DASHCAM_DIR` | 否 | 监控记录目录（new-api-dashcam 的 `DASHCAM_DIR`，只读挂载）；留空则会话功能关闭 |
+| `DASHCAM_TOKEN_HEADER_PREFIX` | 否 | 指纹重构前缀，默认 `Bearer sk-` |
+| `DASHCAM_MAX_WINDOW_DAYS` / `DASHCAM_MAX_BLOB_BYTES` / `DASHCAM_RAW_PREVIEW_BYTES` | 否 | 会话查询保护：窗口 31 天、单文件 16 MiB、原文预览 256 KiB |
 
 > 会话查看另需对 `tokens` 表的一次只读授权：`GRANT SELECT ON tokens TO <dashboard_readonly>;`。
 > 缺权限时列表提示"无法反查 token 指纹"，统计功能不受影响。

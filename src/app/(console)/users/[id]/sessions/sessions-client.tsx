@@ -16,40 +16,40 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { AuditDetailDialog } from "@/components/audit/audit-detail-dialog";
-import { AuditThreadDialog } from "@/components/audit/audit-thread-dialog";
+import { DashcamDetailDialog } from "@/components/dashcam/dashcam-detail-dialog";
+import { DashcamThreadDialog } from "@/components/dashcam/dashcam-thread-dialog";
 import {
   DEFAULT_SESSION_VIEW,
   SessionFilters,
   type SessionView,
-} from "@/components/audit/session-filters";
+} from "@/components/dashcam/session-filters";
 import {
   ConversationTable,
   RequestTable,
   UngroupedHint,
-} from "@/components/audit/session-table";
+} from "@/components/dashcam/session-table";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { dayRangeOf, listDaysInRange, resolveRangeFromParams } from "@/lib/time-range";
 import { useApi } from "@/lib/use-api";
 import type {
-  AuditConversationRow,
-  AuditSessionList,
-  AuditSessionRow,
-} from "@/server/audit/types";
+  DashcamConversationRow,
+  DashcamSessionList,
+  DashcamSessionRow,
+} from "@/server/dashcam/types";
 
-/** 每次加载的步长（可切）；不得超过服务端 `AUDIT_MAX_PAGE_SIZE`。 */
+/** 每次加载的步长（可切）；不得超过服务端 `DASHCAM_MAX_PAGE_SIZE`。 */
 const STEPS = [20, 50] as const;
 
-type Row = AuditConversationRow | AuditSessionRow;
+type Row = DashcamConversationRow | DashcamSessionRow;
 
 function keyOf(grouped: boolean, row: Row): string {
   if (!grouped) {
-    const r = row as AuditSessionRow;
+    const r = row as DashcamSessionRow;
     return `${r.date}-${r.traceId}-${r.fp}`;
   }
-  const key = (row as AuditConversationRow).sessionKey;
-  return key === undefined ? `single:${(row as AuditConversationRow).last.traceId}` : key;
+  const key = (row as DashcamConversationRow).sessionKey;
+  return key === undefined ? `single:${(row as DashcamConversationRow).last.traceId}` : key;
 }
 
 function Notice({ children }: { children: ReactNode }) {
@@ -79,8 +79,8 @@ export function SessionsClient({ userId }: { userId: string }) {
   const [page, setPage] = useState(1);
   /** 累积的行：page=1 替换、page>1 去重追加。 */
   const [rows, setRows] = useState<Row[]>([]);
-  const [selected, setSelected] = useState<AuditSessionRow | null>(null);
-  const [thread, setThread] = useState<AuditConversationRow | null>(null);
+  const [selected, setSelected] = useState<DashcamSessionRow | null>(null);
+  const [thread, setThread] = useState<DashcamConversationRow | null>(null);
 
   const dates = useMemo(() => listDaysInRange(range.start, range.end), [range.start, range.end]);
   const activeDate = view.date !== null && dates.includes(view.date) ? view.date : null;
@@ -98,7 +98,7 @@ export function SessionsClient({ userId }: { userId: string }) {
   if (view.stream !== "all") params.set("stream", view.stream === "stream" ? "true" : "false");
   if (view.failedOnly) params.set("failed", "true");
 
-  const api = useApi<AuditSessionList>(`/api/audit/sessions?${params.toString()}`);
+  const api = useApi<DashcamSessionList>(`/api/dashcam/sessions?${params.toString()}`);
 
   // 响应合并：page=1 替换、page>1 追加。分组与否、页码、每页条数都在响应里，
   // 合并逻辑只依赖 api.data，避免与视图状态产生时序耦合。
@@ -147,8 +147,8 @@ export function SessionsClient({ userId }: { userId: string }) {
   const title = [displayName, username].filter(Boolean).join(" ") || `用户 #${userId}`;
   const ungrouped = rows.filter((row) => keyOf(grouped, row).startsWith("single:")).length;
 
-  const conversationRows = grouped ? (rows as AuditConversationRow[]) : [];
-  const sessionRows = grouped ? [] : (rows as AuditSessionRow[]);
+  const conversationRows = grouped ? (rows as DashcamConversationRow[]) : [];
+  const sessionRows = grouped ? [] : (rows as DashcamSessionRow[]);
 
   return (
     <div className="flex h-[calc(100dvh-var(--app-header-height)-3rem)] min-h-[360px] flex-col gap-3 overflow-hidden">
@@ -196,7 +196,7 @@ export function SessionsClient({ userId }: { userId: string }) {
           ) : data.available === false ? (
             <div className="flex min-h-0 flex-1 items-center justify-center">
               <Notice>
-                审计正文未启用（未配置 <span className="font-mono">AUDIT_DIR</span>
+                会话监控未启用（未配置 <span className="font-mono">DASHCAM_DIR</span>
                 ），配置并只读挂载采集目录后即可查看。
               </Notice>
             </div>
@@ -294,7 +294,7 @@ export function SessionsClient({ userId }: { userId: string }) {
         </div>
       </Card>
 
-      <AuditDetailDialog
+      <DashcamDetailDialog
         userId={userId}
         row={selected}
         onClose={() => {
@@ -302,7 +302,7 @@ export function SessionsClient({ userId }: { userId: string }) {
         }}
       />
 
-      <AuditThreadDialog
+      <DashcamThreadDialog
         userId={userId}
         conversation={thread}
         start={window.start}

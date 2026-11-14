@@ -116,7 +116,7 @@ export function formatDateTime(epochSeconds: number): string {
 
 /**
  * Unix 秒 → 东八区 `YYYY-MM-DD HH:mm:ss`。
- * 审计列表按秒区分请求（同一分钟内可能有多条），故不能用分钟精度。
+ * 监控列表按秒区分请求（同一分钟内可能有多条），故不能用分钟精度。
  */
 export function formatDateTimeSecond(epochSeconds: number): string {
   if (!Number.isFinite(epochSeconds)) return "—";

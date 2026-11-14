@@ -1,0 +1,34 @@
+[Unit]
+Description=new-api-dashcam —— 对话监控前置代理
+Documentation=file:/opt/dashcam/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=new-api-dashcam
+Group=new-api-dashcam
+EnvironmentFile=/etc/dashcam.env
+ExecStart=/opt/dashcam/new-api-dashcam
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2s
+LimitNOFILE=65535
+
+# 加固：代理只需要写记录目录，其余路径只读
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/new-api-dashboard/dashcam
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=new-api-dashcam
+
+[Install]
+WantedBy=multi-user.target
