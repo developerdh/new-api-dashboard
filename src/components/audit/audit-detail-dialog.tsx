@@ -21,6 +21,7 @@ import {
   type BlockFilter,
 } from "@/components/audit/audit-message-filters";
 import { MessageBlock } from "@/components/audit/message-block";
+import { TokenPair } from "@/components/audit/token-pair";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -268,10 +269,15 @@ export function AuditDetailDialog({
               <span>·</span>
               <span>{row.protocol}</span>
               <span>·</span>
-              <BytePair
-                request={formatBytes(row.requestBytes)}
-                response={formatBytes(row.responseBytes)}
-              />
+              {/* token 优先（模型视角的真实口径）；正文缺失 / 非对话协议没有 usage 时退回字节胶囊 */}
+              {envelope?.response.usage === undefined ? (
+                <BytePair
+                  request={formatBytes(row.requestBytes)}
+                  response={formatBytes(row.responseBytes)}
+                />
+              ) : (
+                <TokenPair usage={envelope.response.usage} />
+              )}
               <span>·</span>
               <span className="tabular-nums">
                 {row.durationMs} ms

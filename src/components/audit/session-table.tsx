@@ -8,7 +8,7 @@
  * - `request`：这一次调用的耗时/首字/大小 —— 排查单次异常。
  */
 import { StatusBadge, Tag } from "@/components/audit/badges";
-import { BytePair, BytePairHead } from "@/components/audit/byte-pair";
+import { TokenPair, TokenPairHead } from "@/components/audit/token-pair";
 import {
   Table,
   TableBody,
@@ -72,8 +72,11 @@ export function ConversationTable({
           <TableHead>模型</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="text-right">起止跨度</TableHead>
-          <TableHead className="text-right">
-            <BytePairHead />
+          <TableHead
+            className="text-right"
+            title="最近一轮请求的 token 用量（缓存=命中缓存的输入 token）；悬停单元格可见正文字节"
+          >
+            <TokenPairHead />
           </TableHead>
           <TableHead className="w-6" />
         </TableRow>
@@ -114,11 +117,19 @@ export function ConversationTable({
             <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
               {row.requestCount > 1 ? formatDuration(row.lastEpoch - row.firstEpoch) : "—"}
             </TableCell>
-            <TableCell className="text-right tabular-nums">
-              <BytePair
-                request={formatBytes(row.totalRequestBytes)}
-                response={formatBytes(row.totalResponseBytes)}
-              />
+            <TableCell
+              className="text-right tabular-nums"
+              title={
+                row.usage === undefined
+                  ? `正文累计 ${formatBytes(row.totalRequestBytes)} → ${formatBytes(row.totalResponseBytes)}`
+                  : `最近一轮 · 正文 ${formatBytes(row.last.requestBytes)} → ${formatBytes(row.last.responseBytes)}`
+              }
+            >
+              {row.usage === undefined ? (
+                <span className="text-muted-foreground">—</span>
+              ) : (
+                <TokenPair usage={row.usage} />
+              )}
             </TableCell>
             <TableCell className="text-muted-foreground">›</TableCell>
           </TableRow>
@@ -147,8 +158,11 @@ export function RequestTable({
             会话键
           </TableHead>
           <TableHead className="text-right">耗时 / 首字</TableHead>
-          <TableHead className="text-right">
-            <BytePairHead />
+          <TableHead
+            className="text-right"
+            title="该次请求的 token 用量（缓存=命中缓存的输入 token）；悬停单元格可见正文字节"
+          >
+            <TokenPairHead />
           </TableHead>
           <TableHead className="w-6" />
         </TableRow>
@@ -191,11 +205,19 @@ export function RequestTable({
                 / {row.stream ? `${row.firstTokenMs} ms` : "—"}
               </span>
             </TableCell>
-            <TableCell className="text-right tabular-nums">
-              <BytePair
-                request={formatBytes(row.requestBytes)}
-                response={formatBytes(row.responseBytes)}
-              />
+            <TableCell
+              className="text-right tabular-nums"
+              title={
+                row.usage === undefined
+                  ? `正文 ${formatBytes(row.requestBytes)} → ${formatBytes(row.responseBytes)}`
+                  : `正文 ${formatBytes(row.requestBytes)} → ${formatBytes(row.responseBytes)} · 输入 ${row.usage.promptTokens ?? 0} · 输出 ${row.usage.completionTokens ?? 0} token`
+              }
+            >
+              {row.usage === undefined ? (
+                <span className="text-muted-foreground">—</span>
+              ) : (
+                <TokenPair usage={row.usage} />
+              )}
             </TableCell>
             <TableCell className="text-muted-foreground">›</TableCell>
           </TableRow>

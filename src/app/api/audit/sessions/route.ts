@@ -21,6 +21,7 @@ import { toAuditErrorResponse } from "@/server/audit/errors";
 import { scanConversations, scanSessions } from "@/server/audit/index";
 import { auditDir, auditMaxWindowDays, isAuditAvailable } from "@/server/audit/paths";
 import { parseSessionsQuery } from "@/server/audit/query";
+import { attachUsage, hydrateSessionUsages } from "@/server/audit/usage";
 import type { AuditSessionList } from "@/server/audit/types";
 import { ok } from "@/server/http";
 import { fingerprintsOfUser, loadTokenFingerprints } from "@/server/queries/audit-tokens";
@@ -100,11 +101,19 @@ export async function GET(request: Request): Promise<Response> {
 
     if (grouped) {
       const result = await scanConversations(scanInput);
+      // 会话行的 token 只取「最近一轮」（row.last）：会话累计需要读全部正文，成本随轮次线性走
+      const usages = await hydrateSessionUsages(
+        dir,
+        result.conversations.map((conversation) => conversation.last),
+      );
       const data: AuditSessionList = {
         available: true,
         grouped: true,
         sessions: [],
-        conversations: result.conversations,
+        conversations: result.conversations.map((conversation) => {
+          const last = attachUsage(conversation.last, usages);
+          return { ...conversation, last, ...(last.usage === undefined ? {} : { usage: last.usage }) };
+        }),
         page: query.page,
         pageSize: query.limit,
         total: result.total,
@@ -119,10 +128,12 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     const scan = await scanSessions(scanInput);
+    // 当前页可见行才水合 token（预算 AUDIT_USAGE_HYDRATE_MAX，正文解析有 30s 缓存）
+    const usages = await hydrateSessionUsages(dir, scan.rows);
     const data: AuditSessionList = {
       available: true,
       grouped: false,
-      sessions: scan.rows,
+      sessions: scan.rows.map((row) => attachUsage(row, usages)),
       page: query.page,
       pageSize: query.limit,
       total: null,

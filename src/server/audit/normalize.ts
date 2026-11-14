@@ -950,6 +950,22 @@ function looksLikeSse(text: string): boolean {
   return head.startsWith("data:") || head.startsWith("event:");
 }
 
+/**
+ * 只提取响应侧 usage（列表 token 水合用）。
+ *
+ * 与 `normalizeAudit` 相比省掉了请求侧解析；响应块解析是必要的伴生成本
+ * （usage 混在 JSON / SSE 流里，无法只扫 usage 字段）。
+ */
+export function extractUsage(input: {
+  path: string;
+  responseText: string;
+  truncated: boolean;
+}): AuditResponseBody["usage"] | undefined {
+  const protocol = detectProtocol(input.path);
+  const parsed = parseResponse(protocol, input.responseText, input.truncated);
+  return parsed.usage;
+}
+
 function parseResponse(
   protocol: AuditProtocol,
   text: string,

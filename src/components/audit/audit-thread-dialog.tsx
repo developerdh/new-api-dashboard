@@ -23,11 +23,11 @@ import {
   type BlockFilter,
 } from "@/components/audit/audit-message-filters";
 import { StatusBadge, Tag } from "@/components/audit/badges";
-import { BytePair } from "@/components/audit/byte-pair";
 import { MessageBlock } from "@/components/audit/message-block";
+import { TokenPair } from "@/components/audit/token-pair";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { formatBytes, formatDateTimeSecond, formatNumber } from "@/lib/format";
+import { formatBytes, formatDateTimeSecond } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 import type {
@@ -253,12 +253,12 @@ function TurnBody({
               finish_reason {envelope.response.finishReason}
             </span>
           )}
-          {usage?.promptTokens === undefined ? null : (
-            <span className="rounded-md border px-1.5 py-0.5 tabular-nums">
-              token {formatNumber(usage.promptTokens)} →{" "}
-              {formatNumber(usage.completionTokens ?? 0)}
-            </span>
+          {usage === undefined ? null : (
+            <TokenPair usage={usage} />
           )}
+          <span className="rounded-md border px-1.5 py-0.5">
+            正文 {formatBytes(envelope.request.bytes)} → {formatBytes(envelope.response.bytes)}
+          </span>
         </div>
       </div>
     </div>
@@ -303,10 +303,19 @@ function TurnCard({
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {turn.durationMs} ms
         </span>
-        <BytePair
-          request={formatBytes(turn.requestBytes)}
-          response={formatBytes(turn.responseBytes)}
-        />
+        {turn.usage === undefined ? (
+          <span
+            className="shrink-0 text-[11px] text-muted-foreground"
+            title={`正文 ${formatBytes(turn.requestBytes)} → ${formatBytes(turn.responseBytes)}（token 需读正文，超出本轮水合预算或不可读）`}
+          >
+            —
+          </span>
+        ) : (
+          <TokenPair
+            usage={turn.usage}
+            className="shrink-0"
+          />
+        )}
       </button>
       {open ? <TurnBody userId={userId} turn={turn} filter={filter} highlight={highlight} /> : null}
     </div>

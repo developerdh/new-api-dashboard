@@ -556,10 +556,12 @@ export async function scanThread(input: ThreadScanInput): Promise<ThreadScanResu
       stream: entry.st,
       durationMs: entry.ms,
       firstTokenMs: entry.ft,
+      path: entry.p,
       requestBytes: entry.rq,
       responseBytes: entry.rs,
       requestTruncated: (entry.tr & 1) === 1,
       responseTruncated: (entry.tr & 2) === 2,
+      gzip: { request: entry.qz, response: entry.rz },
       prev: previous === undefined ? null : { traceId: previous.entry.t, date: previous.date },
     };
   });
