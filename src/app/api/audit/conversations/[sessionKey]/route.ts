@@ -22,6 +22,7 @@ import { scanThread } from "@/server/audit/index";
 import { auditDir, auditMaxWindowDays, isAuditAvailable } from "@/server/audit/paths";
 import { parseThreadQuery } from "@/server/audit/query";
 import { AuditBlobMissingError } from "@/server/audit/reader";
+import { hydrateSessionUsages } from "@/server/audit/usage";
 import type { AuditThread } from "@/server/audit/types";
 import { ok } from "@/server/http";
 import { fingerprintsOfUser, loadTokenFingerprints } from "@/server/queries/audit-tokens";
@@ -62,10 +63,26 @@ export async function GET(
       maxDays: auditMaxWindowDays(),
     });
 
+    // 轮次 token 水合：只读最近 N 轮的响应正文（超长会话的更早轮次不带 usage，界面显示 —）
+    // 倒序传入让预算优先覆盖「最新的」轮次
+    const usages = await hydrateSessionUsages(
+      dir,
+      [...thread.turns].reverse().map((turn) => ({
+        date: turn.date,
+        fp: turn.fingerprint,
+        traceId: turn.traceId,
+        path: turn.path,
+        responseTruncated: turn.responseTruncated,
+        gzip: turn.gzip,
+      })),
+    );
     const data: AuditThread = {
       sessionKey: query.sessionKey,
       fingerprints: thread.fingerprints,
-      turns: thread.turns,
+      turns: thread.turns.map((turn) => {
+        const usage = usages.get(`${turn.date}:${turn.fingerprint}:${turn.traceId}`);
+        return usage === undefined ? turn : { ...turn, usage };
+      }),
       total: thread.total,
       truncated: thread.truncated,
       scannedDates: thread.scannedDates,

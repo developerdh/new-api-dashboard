@@ -57,6 +57,21 @@ export interface AuditIndexEntry {
   k?: string;
 }
 
+/**
+ * 单次请求的 token 用量（从响应正文提取，**索引里没有**）。
+ *
+ * 列表行的 `usage` 由服务端对「当前页可见行」惰性读 blob 水合：
+ * 预算 `AUDIT_USAGE_HYDRATE_MAX` 之外的行不带该字段，界面显示 `—`。
+ */
+export interface AuditUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  /** 命中缓存的输入 token */
+  cachedTokens?: number;
+  /** 写入缓存的 token（Anthropic 专有） */
+  cacheWriteTokens?: number;
+}
+
 /** 列表行（API 响应与界面共用）。 */
 export interface AuditSessionRow {
   traceId: string;
@@ -86,6 +101,8 @@ export interface AuditSessionRow {
   ip?: string;
   /** 会话键哈希；缺失时该请求独立成行（未聚合） */
   sessionKey?: string;
+  /** 该请求的 token 用量（正文可读且解析成功时由服务端水合） */
+  usage?: AuditUsage;
 }
 
 /** 会话级聚合行（`group=session` 时返回）。 */
@@ -107,6 +124,11 @@ export interface AuditConversationRow {
   truncatedCount: number;
   totalRequestBytes: number;
   totalResponseBytes: number;
+  /**
+   * 会话内**最近一轮**请求的 token 用量（不是会话累计——累计需要读全部正文，
+   * 成本随轮次线性增长，超出列表的预算口径）。
+   */
+  usage?: AuditUsage;
   /** 会话内最新一条请求（未聚合时即该请求本身，用于打开详情 / 线程锚点） */
   last: AuditSessionRow;
 }
@@ -126,10 +148,14 @@ export interface AuditThreadTurn {
   stream: boolean;
   durationMs: number;
   firstTokenMs: number;
+  path: string;
   requestBytes: number;
   responseBytes: number;
   requestTruncated: boolean;
   responseTruncated: boolean;
+  gzip: { request: boolean; response: boolean };
+  /** 该轮的 token 用量（线程接口按预算水合最近若干轮，其余轮缺省） */
+  usage?: AuditUsage;
   /** 上一轮的定位信息（详情接口算增量用），首轮为 null。 */
   prev: { traceId: string; date: string } | null;
 }
