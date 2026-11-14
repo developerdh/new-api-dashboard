@@ -13,6 +13,12 @@
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { shanghaiDateOf } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
 
@@ -71,7 +77,53 @@ export function buildMonth(year: number, month: number): Cell[] {
 }
 
 const SELECT_CLASS =
-  "h-7 rounded-md border border-input bg-background px-1 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30";
+  "flex h-7 items-center justify-between gap-1 rounded-md border border-input bg-background px-1.5 text-xs shadow-xs outline-none transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30";
+
+/** 月/年选择：Radix 下拉，样式与面板统一（原生 select 的系统样式与整体不搭）。 */
+function MonthYearSelect({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  width,
+}: {
+  value: number;
+  options: ReadonlyArray<{ value: number; label: string }>;
+  onChange: (value: number) => void;
+  ariaLabel: string;
+  width: string;
+}) {
+  const current = options.find((option) => option.value === value);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          title={ariaLabel}
+          className={cn(SELECT_CLASS, width)}
+        >
+          {current?.label ?? value}
+          <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="max-h-60 min-w-[4.5rem]">
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            onSelect={() => onChange(option.value)}
+            className={cn(
+              "justify-center text-xs",
+              option.value === value && "bg-accent font-semibold text-accent-foreground",
+            )}
+          >
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function AuditDatePicker({
   value,
@@ -102,7 +154,13 @@ export function AuditDatePicker({
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent): void => {
-      if (rootRef.current?.contains(event.target as Node) !== true) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) === true) return;
+      // 月/年下拉是 Radix portal，渲染在 body 上，点它不算点外面
+      if (target instanceof Element && target.closest("[data-radix-popper-content-wrapper]") !== null) {
+        return;
+      }
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") setOpen(false);
@@ -178,30 +236,20 @@ export function AuditDatePicker({
               <ChevronLeft className="size-4" />
             </button>
             <div className="flex items-center gap-1">
-              <select
+              <MonthYearSelect
                 value={cursor.month}
-                onChange={(event) => setCursor((c) => ({ ...c, month: Number(event.target.value) }))}
-                className={SELECT_CLASS}
-                aria-label="月份"
-              >
-                {MONTHS.map((label, index) => (
-                  <option key={label} value={index + 1}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <select
+                options={MONTHS.map((label, index) => ({ value: index + 1, label }))}
+                onChange={(month) => setCursor((c) => ({ ...c, month }))}
+                ariaLabel="月份"
+                width="w-[4.5rem]"
+              />
+              <MonthYearSelect
                 value={cursor.year}
-                onChange={(event) => setCursor((c) => ({ ...c, year: Number(event.target.value) }))}
-                className={SELECT_CLASS}
-                aria-label="年份"
-              >
-                {years.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
+                options={years.map((year) => ({ value: year, label: String(year) }))}
+                onChange={(year) => setCursor((c) => ({ ...c, year }))}
+                ariaLabel="年份"
+                width="w-[4rem]"
+              />
             </div>
             <button
               type="button"
