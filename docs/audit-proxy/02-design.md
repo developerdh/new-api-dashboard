@@ -122,12 +122,17 @@ fp = sha256("Bearer sk-" + tokens.key)[:12]
 | `tr` | int | 截断位掩码：`1`=请求截断，`2`=响应截断 |
 | `e` | string | 上游错误信息，成功时省略 |
 | `ip` | string | 客户端 IP |
+| `k` | string | 会话键哈希（sha256(key) 前 16 位十六进制），无会话标识时省略 |
+| `pt` / `ct` | int | token 用量：输入 / 输出。采集时从响应正文 best-effort 提取（尾部窗口扫描 usage 对象，`audit-proxy/usage.go`），失败或旧版采集省略 |
+| `cc` / `cw` | int | token 用量：缓存命中输入 / 缓存写入。零值省略 |
 
 示例：
 
 ```json
-{"t":"0123456789abcdef0123456789abcdef","u":"6981744f7254","d":"2026-11-13T09:36:25.0621778+08:00","p":"/v1/chat/completions","m":"gpt-4o-mini","s":200,"st":true,"ms":51,"ft":14,"rq":87,"rs":117,"qz":false,"rz":false,"tr":0,"ip":"127.0.0.1"}
+{"t":"0123456789abcdef0123456789abcdef","u":"6981744f7254","d":"2026-11-13T09:36:25.0621778+08:00","p":"/v1/chat/completions","m":"gpt-4o-mini","s":200,"st":true,"ms":51,"ft":14,"rq":87,"rs":117,"qz":false,"rz":false,"tr":0,"ip":"127.0.0.1","pt":1200,"ct":48,"cc":900}
 ```
+
+> **usage 提取契约**：采集端（Go，`audit-proxy/usage.go`）与看板（TS，`src/server/audit/normalize.ts`）对同一段正文必须给出相同数字；契约样例在 `audit-proxy/testdata/usage/`，两侧测试共用（任一侧行为变更测试即红）。看板以索引字段为唯一权威来源，正文解析仅作旧数据回退。
 
 ### 5.1 为什么索引里没有提示词
 

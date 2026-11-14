@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-demo","choices":[{"index":0,"delta":{"role":"assistant","content":"你"}}]}
+
+data: {"id":"chatcmpl-demo","choices":[{"index":0,"delta":{"content":"好"}}]}
+
+data: {"id":"chatcmpl-demo","choices":[{"index":0,"delta":{}}],"usage":{"prompt_tokens":800,"completion_tokens":12,"total_tokens":812}}
+
+data: {"id":"chatcmpl-demo","choices":[],"usage":{"prompt_tokens":800,"completion_tokens":40,"total_tokens":840}}
+
+data: [DONE]
+

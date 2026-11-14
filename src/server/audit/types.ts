@@ -55,12 +55,22 @@ export interface AuditIndexEntry {
   ip?: string;
   /** 会话键哈希（sha256(key) 前 16 位）；缺失表示该请求没有可用会话标识 */
   k?: string;
+  /**
+   * token 用量（采集时从响应正文 best-effort 提取，见 audit-proxy/usage.go）：
+   * pt=输入 / ct=输出 / cc=缓存命中输入 / cw=缓存写入。
+   * 旧版采集或解析失败时缺省，看板对这类行回退到读时水合或显示 —。
+   */
+  pt?: number;
+  ct?: number;
+  cc?: number;
+  cw?: number;
 }
 
 /**
- * 单次请求的 token 用量（从响应正文提取，**索引里没有**）。
+ * 单次请求的 token 用量。
  *
- * 列表行的 `usage` 由服务端对「当前页可见行」惰性读 blob 水合：
+ * 首选来源是**索引字段**（采集端提取的 `pt/ct/cc/cw`，见 audit-proxy/usage.go）；
+ * 索引没有时（旧数据），服务端才对「当前页可见行」惰性读正文水合：
  * 预算 `AUDIT_USAGE_HYDRATE_MAX` 之外的行不带该字段，界面显示 `—`。
  */
 export interface AuditUsage {

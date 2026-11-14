@@ -41,6 +41,12 @@ type indexEntry struct {
 	// K 会话键哈希（sha256(key) 前 16 位十六进制），缺失表示该协议/客户端未提供会话标识。
 	// 只存哈希：键可能含租户、项目等业务标识，且分组只需要可比较的稳定值。
 	K string `json:"k,omitempty"`
+	// token 用量（pt=输入 / ct=输出 / cc=缓存命中输入 / cw=缓存写入），采集时从响应
+	// 正文 best-effort 提取（见 usage.go）；解析失败或旧版采集缺省，看板显示 —。
+	PT int64 `json:"pt,omitempty"`
+	CT int64 `json:"ct,omitempty"`
+	CC int64 `json:"cc,omitempty"`
+	CW int64 `json:"cw,omitempty"`
 }
 
 const (
@@ -277,6 +283,13 @@ func (r *record) finish(errMsg string) {
 	reqGz := r.sink.compressIfNeeded(r.reqPath+".tmp", r.reqPath, r.reqN)
 	resGz := r.sink.compressIfNeeded(r.resPath+".tmp", r.resPath, r.resN)
 
+	// token 用量：compressIfNeeded 会把 .tmp rename（或转成 .gz），提取必须在它之前。
+	// 尾部扫描 + 少量小 JSON 解析，失败静默省略字段，不阻断落盘与索引。
+	usage := tokenUsage{}
+	if r.resN > 0 {
+		usage = extractUsageFromFile(r.resPath + ".tmp")
+	}
+
 	if m := modelPattern.FindSubmatch(r.peek); len(m) == 2 {
 		r.model = string(m[1])
 	}
@@ -303,6 +316,12 @@ func (r *record) finish(errMsg string) {
 	}
 	if !r.firstByte.IsZero() {
 		entry.FT = r.firstByte.Sub(r.start).Milliseconds()
+	}
+	if !usage.empty() {
+		entry.PT = usage.prompt
+		entry.CT = usage.completion
+		entry.CC = usage.cached
+		entry.CW = usage.cacheWrite
 	}
 	r.sink.appendIndex(r.start, entry)
 }

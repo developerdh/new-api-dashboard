@@ -63,11 +63,14 @@ export async function GET(
       maxDays: auditMaxWindowDays(),
     });
 
-    // 轮次 token 水合：只读最近 N 轮的响应正文（超长会话的更早轮次不带 usage，界面显示 —）
+    // 轮次 token 首选索引字段（采集端提取）；旧数据没有字段才读时水合兜底，
     // 倒序传入让预算优先覆盖「最新的」轮次
     const usages = await hydrateSessionUsages(
       dir,
-      [...thread.turns].reverse().map((turn) => ({
+      [...thread.turns]
+        .reverse()
+        .filter((turn) => turn.usage === undefined)
+        .map((turn) => ({
         date: turn.date,
         fp: turn.fingerprint,
         traceId: turn.traceId,

@@ -27,6 +27,7 @@ import type {
   AuditIndexEntry,
   AuditSessionRow,
   AuditThreadTurn,
+  AuditUsage,
 } from "./types";
 
 /** 单日索引缓存上限：超过则不缓存，避免大日文件把进程内 LRU 撑爆。 */
@@ -83,6 +84,34 @@ function toInt(value: unknown, fallback = 0): number {
   return Number.isFinite(numeric) ? Math.trunc(numeric) : fallback;
 }
 
+/** 索引可选整数字段：缺失 / 非法 / 非正数都视为缺省（采集端零值不落盘）。 */
+function optionalPositiveInt(value: unknown): number | undefined {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  return Math.trunc(numeric);
+}
+
+/**
+ * 索引条目 → usage。采集端（audit-proxy/usage.go）落盘时已提取，是**唯一权威来源**；
+ * 返回 undefined 表示索引没有该字段（旧数据），调用方才走读时水合兜底。
+ */
+export function usageOfIndexEntry(entry: AuditIndexEntry): AuditUsage | undefined {
+  if (
+    entry.pt === undefined &&
+    entry.ct === undefined &&
+    entry.cc === undefined &&
+    entry.cw === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(entry.pt === undefined ? {} : { promptTokens: entry.pt }),
+    ...(entry.ct === undefined ? {} : { completionTokens: entry.ct }),
+    ...(entry.cc === undefined ? {} : { cachedTokens: entry.cc }),
+    ...(entry.cw === undefined ? {} : { cacheWriteTokens: entry.cw }),
+  };
+}
+
 function toText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -126,6 +155,10 @@ export function parseIndexLine(line: string): AuditIndexEntry | null {
     ...(toText(record.e) === "" ? {} : { e: toText(record.e) }),
     ...(toText(record.ip) === "" ? {} : { ip: toText(record.ip) }),
     ...(SESSION_KEY_PATTERN.test(sessionKey) ? { k: sessionKey } : {}),
+    ...(optionalPositiveInt(record.pt) === undefined ? {} : { pt: optionalPositiveInt(record.pt) }),
+    ...(optionalPositiveInt(record.ct) === undefined ? {} : { ct: optionalPositiveInt(record.ct) }),
+    ...(optionalPositiveInt(record.cc) === undefined ? {} : { cc: optionalPositiveInt(record.cc) }),
+    ...(optionalPositiveInt(record.cw) === undefined ? {} : { cw: optionalPositiveInt(record.cw) }),
   };
 }
 
@@ -264,6 +297,7 @@ export function toSessionRow(entry: AuditIndexEntry, date: string): AuditSession
     requestTruncated: (entry.tr & 1) === 1,
     responseTruncated: (entry.tr & 2) === 2,
     gzip: { request: entry.qz, response: entry.rz },
+    ...(usageOfIndexEntry(entry) === undefined ? {} : { usage: usageOfIndexEntry(entry) }),
     ...(entry.e === undefined ? {} : { error: entry.e }),
     ...(entry.ip === undefined ? {} : { ip: entry.ip }),
     ...(entry.k === undefined ? {} : { sessionKey: entry.k }),
@@ -562,6 +596,7 @@ export async function scanThread(input: ThreadScanInput): Promise<ThreadScanResu
       requestTruncated: (entry.tr & 1) === 1,
       responseTruncated: (entry.tr & 2) === 2,
       gzip: { request: entry.qz, response: entry.rz },
+      ...(usageOfIndexEntry(entry) === undefined ? {} : { usage: usageOfIndexEntry(entry) }),
       prev: previous === undefined ? null : { traceId: previous.entry.t, date: previous.date },
     };
   });

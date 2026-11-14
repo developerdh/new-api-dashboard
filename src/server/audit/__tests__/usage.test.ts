@@ -1,7 +1,47 @@
 /** 单测：token 用量提取（列表水合用）——协议差异 / SSE / 缓存字段。 */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { extractUsage } from "@/server/audit/normalize";
+
+/**
+ * 契约样例：与采集端 Go 测试（audit-proxy/usage_test.go）共用同一份文件。
+ * 两侧对同一段正文必须给出相同的 token 数字——谁改了行为，哪一侧测试就红。
+ */
+const CONTRACT_DIR = fileURLToPath(
+  new URL("../../../../audit-proxy/testdata/usage", import.meta.url),
+);
+
+function sample(name: string): string {
+  return readFileSync(`${CONTRACT_DIR}/${name}`, "utf8");
+}
+
+describe("采集契约样例（与 audit-proxy/usage_test.go 共用 testdata/usage/）", () => {
+  const cases: Array<{
+    name: string;
+    file: string;
+    path: string;
+    want: { pt: number; ct: number; cc: number; cw: number };
+  }> = [
+    { name: "chat json + cached", file: "chat.json", path: "/v1/chat/completions", want: { pt: 1200, ct: 48, cc: 900, cw: 0 } },
+    { name: "chat sse last usage wins", file: "chat-stream.sse", path: "/v1/chat/completions", want: { pt: 800, ct: 40, cc: 0, cw: 0 } },
+    { name: "anthropic json cache read/write", file: "anthropic.json", path: "/v1/messages", want: { pt: 500, ct: 30, cc: 400, cw: 60 } },
+    { name: "anthropic sse merges start/delta", file: "anthropic-stream.sse", path: "/v1/messages", want: { pt: 500, ct: 30, cc: 400, cw: 60 } },
+    { name: "responses json", file: "responses.json", path: "/v1/responses", want: { pt: 300, ct: 20, cc: 250, cw: 0 } },
+    { name: "responses sse nested usage", file: "responses-stream.sse", path: "/v1/responses", want: { pt: 300, ct: 20, cc: 250, cw: 0 } },
+  ];
+
+  for (const tc of cases) {
+    it(tc.name, () => {
+      const usage = extractUsage({ path: tc.path, responseText: sample(tc.file), truncated: false });
+      expect(usage?.promptTokens ?? 0).toBe(tc.want.pt);
+      expect(usage?.completionTokens ?? 0).toBe(tc.want.ct);
+      expect(usage?.cachedTokens ?? 0).toBe(tc.want.cc);
+      expect(usage?.cacheWriteTokens ?? 0).toBe(tc.want.cw);
+    });
+  }
+});
 
 describe("extractUsage", () => {
   it("openai-chat JSON：含 prompt_tokens_details.cached_tokens", () => {
