@@ -50,3 +50,12 @@ dashcam/dist/
 dashcam/data/
 data/dashcam/
 /data
+
+# e2e（Playwright）：状态文件与运行产物不入库
+tests/e2e/.state.json
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+.env.e2e
+
+# GUI 测试证据（本地留存，不入库）
+gui-test-screenshots/

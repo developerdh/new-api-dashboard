@@ -216,6 +216,7 @@ export function DashcamDatePicker({
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
+        data-testid="date-picker-trigger"
         title="按日期过滤（只查看所选自然日）"
         className="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs tabular-nums shadow-xs outline-none transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
       >
@@ -230,6 +231,7 @@ export function DashcamDatePicker({
           data-slot="dashcam-date-picker"
           role="dialog"
           aria-label="选择日期"
+          data-testid="date-picker-panel"
           className="absolute top-full right-0 z-50 mt-1 w-[264px] rounded-xl border bg-popover p-3 text-popover-foreground shadow-md"
         >
           <div className="mb-2 flex items-center justify-between gap-1">
@@ -286,6 +288,8 @@ export function DashcamDatePicker({
                   disabled={disabled}
                   aria-pressed={selected}
                   aria-label={cell.date}
+                  data-testid="date-picker-day"
+                  data-date={cell.date}
                   onClick={() => {
                     onChange(cell.date);
                     setOpen(false);
@@ -310,6 +314,7 @@ export function DashcamDatePicker({
               <button
                 type="button"
                 className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                data-testid="date-picker-clear"
                 onClick={() => {
                   onChange(null);
                   setOpen(false);

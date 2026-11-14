@@ -152,7 +152,10 @@ export function SessionsClient({ userId }: { userId: string }) {
   const sessionRows = grouped ? [] : (rows as DashcamSessionRow[]);
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-height)-3rem)] min-h-[360px] flex-col gap-3 overflow-hidden">
+    <div
+      data-testid="sessions-page"
+      className="flex h-[calc(100dvh-var(--app-header-height)-3rem)] min-h-[360px] flex-col gap-3 overflow-hidden"
+    >
       <header className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">会话记录</h1>
         <span className="text-sm text-muted-foreground">{title}</span>
@@ -248,7 +251,7 @@ export function SessionsClient({ userId }: { userId: string }) {
               </div>
 
               <div className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>
+                <span data-testid="sessions-load-state">
                   已加载 {loaded}
                   {total === null ? " 条请求" : ` / ${total} 个会话`}
                   {data.unmatched === undefined
@@ -284,6 +287,7 @@ export function SessionsClient({ userId }: { userId: string }) {
                       type="button"
                       size="sm"
                       variant="outline"
+                      data-testid="sessions-load-more"
                       onClick={() => setPage((value) => value + 1)}
                     >
                       加载更多

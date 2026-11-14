@@ -12,7 +12,10 @@ export function SamplingNotice({
 }) {
   if (!sampling) return null;
   return (
-    <p className="mb-2 shrink-0 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+    <p
+      data-testid="sampling-notice"
+      className="mb-2 shrink-0 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
+    >
       抽样开启（每 {sampling.modulus} 个调用方保留 {sampling.keep}
       个）：未抽中的调用方不产生任何记录，请求量等汇总只反映被抽中部分；总量口径以 New API
       主库为准。

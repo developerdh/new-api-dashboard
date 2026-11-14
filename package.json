@@ -12,7 +12,10 @@
     "test": "node --require ./scripts/fix-cwd.cjs node_modules/vitest/vitest.mjs run",
     "test:watch": "node --require ./scripts/fix-cwd.cjs node_modules/vitest/vitest.mjs",
     "snapshot": "node --experimental-strip-types scripts/snapshot.ts",
-    "release:pack": "node scripts/pack-release.mjs"
+    "release:pack": "node scripts/pack-release.mjs",
+    "e2e:install": "playwright install chromium",
+    "e2e:seed": "node tests/e2e/seed.mjs",
+    "test:e2e": "node tests/e2e/seed.mjs && playwright test --config tests/e2e/playwright.config.mts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",
@@ -36,6 +39,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
