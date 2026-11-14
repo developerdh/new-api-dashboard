@@ -58,6 +58,6 @@ E2E_SEED_HOST=http://127.0.0.1:3090 pnpm test:e2e
 | `playwright.config.ts` | 配置 + 加载 `.env.e2e`（存在才加载，环境变量优先） |
 | `global-setup.ts` | 预检：缺 Chromium / 缺 `E2E_TOKEN` / 看板不可达 → 明确报错停止（不自动安装） |
 | `seed.mjs` + `shanghai-date.mjs` | 造数与东八区日期口径 |
-| `smoke.spec.ts` | T1-T9 确定性用例 |
+| `smoke.spec.mts` | T1-T8 确定性用例（用例定义见 TESTPLAN.md） |
 | `TESTIDS.md` | data-testid 唯一权威清单（组件 ↔ 用例映射） |
 | `TESTPLAN.md` | 工具中立全量用例（agent / 人工执行） |

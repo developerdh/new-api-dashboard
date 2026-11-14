@@ -31,11 +31,11 @@
 | testid | 元素 | 所在文件 | 用途 | 关联用例 |
 |---|---|---|---|---|
 | `sessions-card` | 用户详情「会话」卡片根节点 | `src/app/(console)/users/[id]/dashcam-sessions.tsx` | 定位卡片、确认渲染 | T3 |
-| `sessions-open-full-list` | 「完整列表」链接（target=_blank） | `src/app/(console)/users/[id]/dashcam-sessions.tsx` | 打开独立列表页 | T8 |
-| `sessions-page` | 独立列表页根节点 | `src/app/(console)/users/[id]/sessions/sessions-client.tsx` | 确认独立页渲染 | T8 |
-| `sessions-load-state` | 独立页页脚「已加载 N」 | `sessions-client.tsx` | 累加加载计数断言 | T8 |
-| `sessions-load-more` | 「加载更多」按钮（可加载时才存在） | `sessions-client.tsx` | 累加加载动作 | T8 |
-| `sampling-notice` | 抽样口径提示条（仅抽样开启时渲染） | `src/components/dashcam/sampling-notice.tsx` | 断言提示出现/不出现 | T9 |
+| `sessions-open-full-list` | 「完整列表」链接（target=_blank） | `src/app/(console)/users/[id]/dashcam-sessions.tsx` | 打开独立列表页 | T7 |
+| `sessions-page` | 独立列表页根节点 | `src/app/(console)/users/[id]/sessions/sessions-client.tsx` | 确认独立页渲染 | T7 |
+| `sessions-load-state` | 独立页页脚「已加载 N」 | `sessions-client.tsx` | 累加加载计数断言 | T7 |
+| `sessions-load-more` | 「加载更多」按钮（可加载时才存在） | `sessions-client.tsx` | 累加加载动作 | T7 |
+| `sampling-notice` | 抽样口径提示条（仅抽样开启时渲染） | `src/components/dashcam/sampling-notice.tsx` | 断言提示出现/不出现 | T8 |
 
 ### 过滤条（`src/components/dashcam/session-filters.tsx`，两入口共用）
 
@@ -59,7 +59,7 @@
 
 | testid | 元素 | 用途 | 关联用例 |
 |---|---|---|---|
-| `sessions-table-session` | 按会话聚合表格 | 定位表格 | T3/T4/T7 |
+| `sessions-table-session` | 按会话聚合表格 | 定位表格 | T3/T4/T6 |
 | `sessions-table-request` | 按请求表格 | 定位表格 | T4 |
 | `sessions-row`（多个） | 数据行（点击打开详情 / 线程） | 选行打开抽屉；配合 `filter({ hasText: 标记或时间 })` 收窄 | T3/T4/T5/T6/T7 |
 | `sessions-ungrouped-hint` | 「未参与聚合」说明行 | 断言无会话键提示渲染 | T3 |
@@ -68,18 +68,18 @@
 
 | testid | 元素 | 用途 | 关联用例 |
 |---|---|---|---|
-| `detail-dialog` | 抽屉容器（含标题/正文全文，可断言造数标记） | 断言抽屉打开与内容 | T5/T6 |
-| `detail-tab-struct` / `detail-tab-raw` / `detail-tab-events` | 页签（结构化 / 原始报文 / 事件流——事件流仅流式请求渲染） | 切换页签 | T5/T6 |
+| `detail-dialog` | 抽屉容器（含标题/正文全文，可断言造数标记） | 断言抽屉打开与内容 | T5 |
+| `detail-tab-struct` / `detail-tab-raw` / `detail-tab-events` | 页签（结构化 / 原始报文 / 事件流——事件流仅流式请求渲染） | 切换页签 | T5 |
 | `detail-fullscreen` | 全屏按钮 | 全屏切换（展示性检查） | T5（可选） |
-| `detail-close` | 关闭按钮 | 关闭抽屉 | T5/T6 |
+| `detail-close` | 关闭按钮 | 关闭抽屉 | T5 |
 
 ## 线程抽屉（`src/components/dashcam/dashcam-thread-dialog.tsx`）
 
 | testid | 元素 | 用途 | 关联用例 |
 |---|---|---|---|
-| `thread-dialog` | 线程抽屉容器（含标题「会话线程 N 轮」与全文） | 断言打开与轮数（文本「N 轮」） | T7 |
-| `thread-turn`（多个，带 `data-turn="序号"`） | 轮次卡片 | 轮次计数、指定轮展开状态：`getByTestId('thread-turn')` + `[data-turn="2"]` | T7 |
-| `thread-close` | 关闭按钮 | 关闭抽屉 | T7 |
+| `thread-dialog` | 线程抽屉容器（含标题「会话线程 N 轮」与全文） | 断言打开与轮数（文本「N 轮」） | T6 |
+| `thread-turn`（多个，带 `data-turn="序号"`） | 轮次卡片 | 轮次计数、指定轮展开状态：`getByTestId('thread-turn')` + `[data-turn="2"]` | T6 |
+| `thread-close` | 关闭按钮 | 关闭抽屉 | T6 |
 
 ## 维护规则
 

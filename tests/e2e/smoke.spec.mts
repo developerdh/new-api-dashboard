@@ -1,5 +1,5 @@
 /**
- * e2e 冒烟用例（T1-T9 确定性子集）。
+ * e2e 冒烟用例（T1-T8 确定性子集，用例定义见 TESTPLAN.md）。
  *
  * 约定：
  * - 定位一律用 data-testid（清单见 tests/e2e/TESTIDS.md），文案只作辅助断言；
@@ -98,7 +98,7 @@ test("T4 过滤：仅错误 + 按日期（当日造数记录可见）", async ()
   await expect(card.getByTestId("date-picker-trigger")).toContainText("全部日期");
 });
 
-test("T5/T6 请求详情抽屉（含段路径新数据 + 造数标记）", async () => {
+test("T5 详情抽屉（按请求视图 · 结构化/原始报文 · 造数标记）", async () => {
   await page.goto(`${BASE}/users/${USER_ID}`);
   const card = page.getByTestId("sessions-card");
   await expect(card.getByTestId("sessions-row").first()).toBeVisible({ timeout: 15_000 });
@@ -118,7 +118,7 @@ test("T5/T6 请求详情抽屉（含段路径新数据 + 造数标记）", async
   await expect(drawer).toBeHidden();
 });
 
-test("T7 线程抽屉（2 轮聚合 + 增量标记）", async () => {
+test("T6 线程抽屉（按会话视图 · 2 轮聚合 + 增量标记）", async () => {
   await page.goto(`${BASE}/users/${USER_ID}`);
   const card = page.getByTestId("sessions-card");
   await expect(card.getByTestId("sessions-row").first()).toBeVisible({ timeout: 15_000 });
@@ -142,7 +142,7 @@ test("T7 线程抽屉（2 轮聚合 + 增量标记）", async () => {
   await expect(thread).toBeHidden();
 });
 
-test("T8 独立会话列表页（新窗口 + 累加加载状态）", async () => {
+test("T7 独立会话列表页（新窗口 + 累加加载状态）", async () => {
   await page.goto(`${BASE}/users/${USER_ID}`);
   const card = page.getByTestId("sessions-card");
   await expect(card.getByTestId("sessions-open-full-list")).toBeVisible({ timeout: 15_000 });
@@ -157,7 +157,7 @@ test("T8 独立会话列表页（新窗口 + 累加加载状态）", async () =>
   await popup.close();
 });
 
-test("T9 抽样口径提示按开关出现/不出现", async () => {
+test("T8 抽样口径提示按开关出现/不出现", async () => {
   await page.goto(`${BASE}/users/${USER_ID}`);
   const card = page.getByTestId("sessions-card");
   await expect(card).toBeVisible({ timeout: 15_000 });
