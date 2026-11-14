@@ -9,7 +9,7 @@
  * - 正文、工具参数超过阈值默认折叠（`MessageBlock`）；
  * - 结构化视图带角色 / 类型 / 关键词过滤，事件流按事件类型聚合（一次响应可能上千个 delta）。
  */
-import { Loader2, RotateCw, X } from "lucide-react";
+import { Loader2, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { StatusBadge, Tag } from "@/components/audit/badges";
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatBytes, formatDateTimeSecond, formatNumber } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
+import { cn } from "@/lib/utils";
 import type {
   AuditBlock,
   AuditRole,
@@ -175,6 +176,8 @@ export function AuditDetailDialog({
   row: AuditSessionRow | null;
   onClose: () => void;
 }) {
+  // 全屏是视图偏好，切换请求时保持
+  const [full, setFull] = useState(false);
   const [tab, setTab] = useState<Tab>("struct");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -261,7 +264,12 @@ export function AuditDetailDialog({
     >
       <DialogContent
         showCloseButton={false}
-        className="top-0 right-0 left-auto flex h-dvh max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l p-0 sm:max-w-3xl"
+        className={cn(
+          // 抽屉形态：右贴边全高；全屏时占满整个视口宽度并去掉左边框。
+          // 两种形态都必须覆盖基类的 sm:max-w-lg，否则会被压回 512px。
+          "top-0 right-0 left-auto flex h-dvh max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0",
+          full ? "border-l-0 sm:max-w-none" : "border-l sm:max-w-3xl",
+        )}
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-3.5">
           <div className="min-w-0">
@@ -289,6 +297,17 @@ export function AuditDetailDialog({
               )}
             </div>
           </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-7 shrink-0"
+            onClick={() => setFull((value) => !value)}
+            aria-label={full ? "退出全屏" : "全屏显示"}
+            title={full ? "退出全屏" : "全屏显示（查看长报文更方便）"}
+          >
+            {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </Button>
           <Button
             type="button"
             size="icon"
