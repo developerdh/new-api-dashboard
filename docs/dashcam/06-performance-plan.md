@@ -4,7 +4,7 @@
 >
 > 评估性质声明：全部数字来自源码逐行推导（行号基于 2026-11-13 的代码状态）与 35 条本地样本（`data/audit/index/2026-11-13.ndjson`）外推，**未经生产压测**。gzip 吞吐与单目录元数据 IOPS 随文件系统与负载特征浮动 2–3 倍；结论用于定级与排优先级，定界以 §9 的压测为准。
 >
-> **2026-11-14 更新**：采集端新增 token 用量提取（`audit-proxy/usage.go`，D11，见 [04-decisions.md](04-decisions.md)），`finish()` 增加一次尾部读 + 小 JSON 解析——不改变本文的四个同步阻塞点结论与 D-P3 设计；§3 的行号为 11-13 快照，实施 D-P3 时按当日代码重新定位。
+> **2026-11-14 更新**：采集端新增 token 用量提取（`dashcam/usage.go`，D11，见 [04-decisions.md](04-decisions.md)），`finish()` 增加一次尾部读 + 小 JSON 解析——不改变本文的四个同步阻塞点结论与 D-P3 设计；§3 的行号为 11-13 快照，实施 D-P3 时按当日代码重新定位。
 
 ## 1. 总原则（专项约束）
 
@@ -81,7 +81,7 @@
 
 ## 6. 看板读取侧拐点
 
-- `src/server/audit/index.ts:157-188` `readIndexDay` **无条件** `readFile` 整份日索引 → `split("\n")` → 逐行 `JSON.parse`；解析发生在 `AUDIT_INDEX_CACHE_MAX_ENTRIES=20000` 判断**之前**；`src/server/cache.ts:161-168` `sizeOf` 还会对全量条目 `JSON.stringify`。
+- `src/server/dashcam/index.ts:157-188` `readIndexDay` **无条件** `readFile` 整份日索引 → `split("\n")` → 逐行 `JSON.parse`；解析发生在 `DASHCAM_INDEX_CACHE_MAX_ENTRIES=20000` 判断**之前**；`src/server/cache.ts:161-168` `sizeOf` 还会对全量条目 `JSON.stringify`。
 - 单日 > 2 万行后索引不再缓存：每次翻页重解析 5 MB+ 并全量 `map/filter/sort`（`scanConversations` 先全量分组），Node 事件循环阻塞 100–200 ms/次。`MAX_GROUP_SCAN_REQUESTS=10_000`（[05-dashboard-plan.md](05-dashboard-plan.md) §10.2）只保护分组，保护不了解析与排序。
 - 影响定性：看板仅管理员使用，"并发打开页面致 OOM"不成立；实际影响为**调用量涨后打开页面变慢**，属体验问题。注意拐点取决于**被采集的 LLM 调用日总量**，与看板使用人数无关。
 - 对应调用量：2 万行/天 ≈ 当前规模的 3.6 倍（≈ 0.7 QPS 持续 8 h，或当前峰值的数倍集中）。
@@ -144,7 +144,7 @@
 2. 阶梯：1 / 5 / 10 / 30 / 50 / 100 / 200 QPS，各 ≥10 分钟。
 3. 记录：TTFT、chunk 间隔 p99、总时长 p99；代理 `/healthz` 计数、CPU%、RSS、fd 数；`iostat` 磁盘 util；同机 new-api 的延迟对照。
 4. 验收线建议：走代理 vs 直连的 TTFT p99 差 < 10 ms（页缓存命中）。
-5. D-P3 实施后增测两组降级行为：`AUDIT_MEM_BUDGET` 调小验证预算截停（`dropped` 增长、转发无感）；慢盘注入验证队列积压与排空。
+5. D-P3 实施后增测两组降级行为：`DASHCAM_MEM_BUDGET` 调小验证预算截停（`dropped` 增长、转发无感）；慢盘注入验证队列积压与排空。
 6. 原计划中"故意让代理慢/返回 502，验证 nginx 是否重发 POST"的专项**撤销**：§7.1 已由 nginx 文档查证证伪。
 
 ## 10. 决策记录（D-P1～D-P5）
@@ -153,25 +153,25 @@
 
 ### D-P1 清理脚本 + 保留期可配置 —— 已裁决：做
 
-**结论**：实现按日期目录的清理脚本；保留期通过 `AUDIT_RETENTION_DAYS` 配置（默认 90 天，与 [02-design.md](02-design.md) §6.3 建议一致）；不部署脚本则维持现状（无清理）。同时清理 `.tmp` 残留（采集中断产物）。脚本必须先 dry-run（打印待删清单，确认后执行）。实施设计见 §14。
+**结论**：实现按日期目录的清理脚本；保留期通过 `DASHCAM_RETENTION_DAYS` 配置（默认 90 天，与 [02-design.md](02-design.md) §6.3 建议一致）；不部署脚本则维持现状（无清理）。同时清理 `.tmp` 残留（采集中断产物）。脚本必须先 dry-run（打印待删清单，确认后执行）。实施设计见 §14。
 
 **依据**：§8——当前规模一年 ≈ 123 GB / 400 万文件且无人清理；保留期是纯运维参数，写死或激进缩短都不可取。
 
-**代价**：脚本需 dry-run 与日期目录双格式（§13 段化后）兼容；清理口径需与看板查询窗口（`AUDIT_MAX_WINDOW_DAYS=31`）保持余量。
+**代价**：脚本需 dry-run 与日期目录双格式（§13 段化后）兼容；清理口径需与看板查询窗口（`DASHCAM_MAX_WINDOW_DAYS=31`）保持余量。
 
 ### D-P2 按调用方指纹比例抽样 —— 已裁决：做，默认关闭
 
-**结论**：按**调用方指纹**整体抽样——被抽中的指纹全量记录，未抽中的完全不落盘；不做按请求随机抽样、不做按模型/错误率等其他维度。机制：`sha256(指纹) % N < K → 记录`，无状态（同指纹恒定判定、重启不抖动），判断放在 begin 之前的 `shouldCapture` 处，未命中只进 `skipped` 计数，转发路径增加成本为一次哈希取模（纳秒级）。**默认 `N=0` 关闭 = 现状全量记录，行为不变**。代理启动时把抽样状态写入 `AUDIT_DIR/meta.json`，看板只读读取后展示统一提示。看板口径：抽样开启时**只有会话层面按被抽中的调用方筛选监听**（被抽中指纹的会话/线程视图完整），其他汇总统计不做用户维度口径（总量以 New API 主库为准）。实施设计见 §12。
+**结论**：按**调用方指纹**整体抽样——被抽中的指纹全量记录，未抽中的完全不落盘；不做按请求随机抽样、不做按模型/错误率等其他维度。机制：`sha256(指纹) % N < K → 记录`，无状态（同指纹恒定判定、重启不抖动），判断放在 begin 之前的 `shouldCapture` 处，未命中只进 `skipped` 计数，转发路径增加成本为一次哈希取模（纳秒级）。**默认 `N=0` 关闭 = 现状全量记录，行为不变**。代理启动时把抽样状态写入 `DASHCAM_DIR/meta.json`，看板只读读取后展示统一提示。看板口径：抽样开启时**只有会话层面按被抽中的调用方筛选监听**（被抽中指纹的会话/线程视图完整），其他汇总统计不做用户维度口径（总量以 New API 主库为准）。实施设计见 §12。
 
 **否决记录**：讨论中曾提出"固定选人白名单"（指定指纹/key 全量监听），否决——未采集的调用方在索引里没有指纹可查（名单无法从数据侧获得），按 key 原文配置则依赖 Authorization 头的确切形态（前缀、`x-api-key` 客户端无 Authorization → `_anon`），配置脆弱且与指纹前缀漏配同型。
 
 **依据**：存储与文件数按比例直降（抽中 K/N ≈ 存储 K/N）；被抽中调用方的会话视图完整（不像按请求随机抽样那样碎片化）。
 
-**代价**：未抽中调用方的历史不可回溯（只能等下个配置周期）；N/K 配置错 = 整体漏采或全采（与指纹前缀漏配同型）；小用户数下粒度是"抽中几个指纹"而非精确比例；抽样开启期间审计看板的请求量汇总只反映被抽中部分（已由统一提示声明口径）。
+**代价**：未抽中调用方的历史不可回溯（只能等下个配置周期）；N/K 配置错 = 整体漏采或全采（与指纹前缀漏配同型）；小用户数下粒度是"抽中几个指纹"而非精确比例；抽样开启期间监控看板的请求量汇总只反映被抽中部分（已由统一提示声明口径）。
 
 ### D-P3 落盘异步化 + worker 压缩 —— 已裁决：做（a+b 组合）
 
-**结论**：不碰协议解析、不存拼接文本，改两条并一次落地：**（a）压缩随流进行**——gzip 从 `finish()` 的"读 tmp + 压缩 + 写 gz + 删 tmp"三次 I/O，变为 worker 上"内存 → gz.tmp"一次直达（阈值逻辑与 `qz`/`rz` 语义不变）；**（b）落盘/压缩/索引/正则全部移入有界队列的后台 worker**——转发路径只剩内存拷贝 + 一次非阻塞入队，磁盘抖动完全不影响 LLM 请求，[02-design.md](02-design.md) §3 的队列承诺归真。配套**全局字节预算**（`AUDIT_MEM_BUDGET`，默认 256 MB）与三层降级（见 §11），预算归零即停采总开关；**不做同步/异步双路径**，回滚靠格式兼容换回旧二进制。`/healthz` 增加 `dropped`、`buffered_bytes`（§7.4）。实施设计见 §11。
+**结论**：不碰协议解析、不存拼接文本，改两条并一次落地：**（a）压缩随流进行**——gzip 从 `finish()` 的"读 tmp + 压缩 + 写 gz + 删 tmp"三次 I/O，变为 worker 上"内存 → gz.tmp"一次直达（阈值逻辑与 `qz`/`rz` 语义不变）；**（b）落盘/压缩/索引/正则全部移入有界队列的后台 worker**——转发路径只剩内存拷贝 + 一次非阻塞入队，磁盘抖动完全不影响 LLM 请求，[02-design.md](02-design.md) §3 的队列承诺归真。配套**全局字节预算**（`DASHCAM_MEM_BUDGET`，默认 256 MB）与三层降级（见 §11），预算归零即停采总开关；**不做同步/异步双路径**，回滚靠格式兼容换回旧二进制。`/healthz` 增加 `dropped`、`buffered_bytes`（§7.4）。实施设计见 §11。
 
 **依据**：转发路径只剩 memcpy + 入队，转发影响不增反降（§3 的四个阻塞点全部移除）；容量天花板从"采集 CPU 锁死"（低配 ≈40 / 中配 ≈150 / 高配 ≈400 QPS）升到 fd/内存/机器总 CPU 边界（≈1100–3600 QPS 档）；磁盘格式零变化（文件布局、索引 schema、`qz`/`rz`/`tr` 不变），看板与清理脚本零改动、新旧二进制混跑与回滚安全；为 D-P5 方案 A 预留接入缝。
 
@@ -232,7 +232,7 @@ worker（N 个，默认 2）：
 `MAX_REQUEST_BYTES` / `MAX_RESPONSE_BYTES` 默认各 128 MiB（[02-design.md](02-design.md) §6.1，覆盖 1M tokens 上下文）。数据驻内存后，逐条上限不能改（既有截断语义），因此用**全局字节预算**：
 
 - 全局 `captureBytes`（atomic）：reqBuf + resBuf + peek 的实时总量，每 chunk 一次 atomic add；
-- 预算 `AUDIT_MEM_BUDGET`（默认 256 MB）；**预算 = 0 即停采总开关**（运维可在不重新部署的情况下热停采集，代替"异步开关"——不保留同步/异步双路径，单一代码路径的测试面小一半，回滚靠格式兼容换旧二进制）；
+- 预算 `DASHCAM_MEM_BUDGET`（默认 256 MB）；**预算 = 0 即停采总开关**（运维可在不重新部署的情况下热停采集，代替"异步开关"——不保留同步/异步双路径，单一代码路径的测试面小一半，回滚靠格式兼容换旧二进制）；
 - 三层降级，全部只作用于采集：
 
 | 时机 | 动作 | 计数 |
@@ -259,8 +259,8 @@ worker（N 个，默认 2）：
 2. **压缩阈值逻辑保留**：worker 按 reqN/resN ≥ `GZIP_THRESHOLD`（64 KB）决定 gzip 或裸 rename，与现状逐字节同构，`qz`/`rz`/`tr` 语义零变化；压缩在 worker 是"内存 → gz.tmp"一次直达，结构上消灭 `finish()` 的三次额外 I/O——(a) 的目标在 (b) 中以此实现，不再是独立机制。
 3. **计数语义**：captured 在 begin 受理时 +1；flush 失败计 failed；队满/预算计 dropped；`/healthz` 新增 `dropped` 与 `buffered_bytes`。
 4. **shutdown**：SIGTERM → `srv.Shutdown`（15 s ctx）→ close(queue) → worker 清空队列（上限 queue 容量 × 预算，秒级）→ 退出。Docker 默认 10 s SIGKILL 丢队内记录，与"崩溃丢流中记录"同级，接受。
-5. **worker 数**：gzip 326 KB ≈ 4–8 ms/条 → 单 worker 125–250 条/s；100 QPS 档位需 2 个。默认 `AUDIT_FLUSH_WORKERS=2`。
-6. **队列容量**：`AUDIT_QUEUE_CAP=256` 条；队内字节受全局预算约束，不独立膨胀。
+5. **worker 数**：gzip 326 KB ≈ 4–8 ms/条 → 单 worker 125–250 条/s；100 QPS 档位需 2 个。默认 `DASHCAM_FLUSH_WORKERS=2`。
+6. **队列容量**：`DASHCAM_QUEUE_CAP=256` 条；队内字节受全局预算约束，不独立膨胀。
 7. **转发侧背板**：`Transport.MaxConnsPerHost`（默认 2048）——唯一作用于转发的限制，超限时新请求排队等空闲连接而非新建，把"fd 耗尽/OOM 进程崩溃"转化为"排队延迟上升"；2048 并发 ≈ 465 QPS 持续（avg 4.4 s），只在故障时刻起作用。`Server.IdleTimeout`（默认 120 s）——只回收请求间空闲的 keep-alive 连接，对流式响应零影响（WriteTimeout 仍不设）；`main.go:56` 注释把两者混为一谈，一并修正。
 8. **磁盘格式零变化**：文件布局、索引 schema、`qz`/`rz`/`tr` 完全不变——看板 reader（`reader.ts:128` 已 gz/非 gz 双候选回退）与清理脚本零改动；新旧二进制混跑、随时回滚均安全。
 9. **与 D-P5 的衔接**：worker 的"持久化一步"就是段式打包的接入缝——方案 A 落地只改 worker 内部（tmp+rename → 段追加），转发路径与预算机制原封不动；A 的 per-fp 段锁在"只有 worker 写"前提下天然无竞争。
@@ -270,9 +270,9 @@ worker（N 个，默认 2）：
 
 | 变量 | 默认 | 语义 |
 |---|---|---|
-| `AUDIT_MEM_BUDGET` | 256 MB | 采集缓冲字节预算；`0` = 停采总开关 |
-| `AUDIT_FLUSH_WORKERS` | 2 | 落盘 worker 数 |
-| `AUDIT_QUEUE_CAP` | 256 | 待落盘队列容量（条） |
+| `DASHCAM_MEM_BUDGET` | 256 MB | 采集缓冲字节预算；`0` = 停采总开关 |
+| `DASHCAM_FLUSH_WORKERS` | 2 | 落盘 worker 数 |
+| `DASHCAM_QUEUE_CAP` | 256 | 待落盘队列容量（条） |
 | `UPSTREAM_MAX_CONNS_PER_HOST` | 2048 | 上游每主机连接数上限（转发侧背板） |
 | `IDLE_TIMEOUT` | 120 s | Server keep-alive 空闲连接回收 |
 
@@ -292,7 +292,7 @@ worker（N 个，默认 2）：
 | `SAMPLE_MODULUS` | 0（关闭） | 抽样模数 N；`0` = 全量记录 |
 | `SAMPLE_KEEP` | 1 | 保留数 K；启用时须 `1 ≤ K ≤ N` |
 
-代理启动时写 `AUDIT_DIR/meta.json`：
+代理启动时写 `DASHCAM_DIR/meta.json`：
 
 ```json
 { "sampling_enabled": false, "sample_modulus": 0, "sample_keep": 1 }
@@ -328,10 +328,10 @@ worker（N 个，默认 2）：
 ## 14. 实施设计：清理脚本（D-P1）
 
 - **对象**：`blobs/<date>/` 整目录 + `index/<date>.ndjson` 同寿命删除；同时清理 `.tmp` 残留（采集中断产物；段化后含半包残留）。
-- **保留期**：`AUDIT_RETENTION_DAYS`（默认 90，与 [02-design.md](02-design.md) §6.3 一致）；`0` = 禁用清理。**不部署脚本 / 不配 cron 则维持现状（无清理），默认行为不变**。
-- **安全**：默认 dry-run（只打印待删清单）；实际删除需显式确认参数；删除动作限定在 `AUDIT_DIR` 内（防止参数注入路径）。
-- **口径**：保留期必须大于看板查询窗口上限（`AUDIT_MAX_WINDOW_DAYS=31`），90 天留有余量；清理只按"日期目录整体"进行，不做按指纹/文件的部分删除（与"看板不删除、合规删除走运维"的边界一致）。
-- **实现形态**：随 audit-proxy 发布包提供脚本（shell），由 systemd timer 或 cron 调度；调度由运维决定，组件不内置常驻清理 goroutine（避免采集进程自己删自己的活跃数据引入新失败面）。
+- **保留期**：`DASHCAM_RETENTION_DAYS`（默认 90，与 [02-design.md](02-design.md) §6.3 一致）；`0` = 禁用清理。**不部署脚本 / 不配 cron 则维持现状（无清理），默认行为不变**。
+- **安全**：默认 dry-run（只打印待删清单）；实际删除需显式确认参数；删除动作限定在 `DASHCAM_DIR` 内（防止参数注入路径）。
+- **口径**：保留期必须大于看板查询窗口上限（`DASHCAM_MAX_WINDOW_DAYS=31`），90 天留有余量；清理只按"日期目录整体"进行，不做按指纹/文件的部分删除（与"看板不删除、合规删除走运维"的边界一致）。
+- **实现形态**：随 new-api-dashcam 发布包提供脚本（shell），由 systemd timer 或 cron 调度；调度由运维决定，组件不内置常驻清理 goroutine（避免采集进程自己删自己的活跃数据引入新失败面）。
 
 ## 15. 实施顺序与文档联动
 
@@ -339,8 +339,8 @@ worker（N 个，默认 2）：
 |---|---|---|---|
 | ⓪ | nginx 文档勘误（§7.1）：03-deployment §5.2 的 backup/重试表述修正 | 无（纯文档） | 03-deployment §5.2 |
 | ① | D-P1 清理脚本 | 无（独立零风险） | 03-deployment §7/§9（脚本实现后）、02-design §6.3 状态 |
-| ② | D-P2 比例抽样 + meta.json + 看板提示 | 无 | 03-deployment §3 配置表、02-design §4（meta.json）、audit-proxy env.example、看板 `.env.example` |
-| ③ | D-P3 a+b + §7.2 围栏 + §7.4 计数（同一实现） | 无 | 02-design §3（队列承诺归真）与 §6.1 配置表、03-deployment §3、audit-proxy README/env.example |
+| ② | D-P2 比例抽样 + meta.json + 看板提示 | 无 | 03-deployment §3 配置表、02-design §4（meta.json）、dashcam env.example、看板 `.env.example` |
+| ③ | D-P3 a+b + §7.2 围栏 + §7.4 计数（同一实现） | 无 | 02-design §3（队列承诺归真）与 §6.1 配置表、03-deployment §3、dashcam README/env.example |
 | ④ | D-P5 方案 A 段式打包 | ③ 的 worker 接入缝 | 02-design §4 布局与 §5 索引字段、reader 文档、03-deployment §7 |
 | ⑤ | §9 压测验证（③ 后执行） | ③ | 视结果修订本文 §4 的分档表 |
 
