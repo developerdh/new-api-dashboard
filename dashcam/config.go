@@ -25,26 +25,44 @@ type config struct {
 	SampleModulus int64
 	SampleKeep    int64
 
+	// 资源围栏（D-P3）：采集缓冲字节预算与后台 worker 配置。
+	// MemBudget=0 是停采总开关；QueueCap 有界，满则丢弃；FlushWorkers 独占落盘。
+	MemBudget       int64
+	FlushWorkers    int
+	QueueCap        int
+	MaxConnsPerHost int
+
 	// 上游响应头等待上限。不含 body 读取：流式响应可能持续十分钟。
 	HeaderTimeout time.Duration
-	// 单次落盘写入的缓冲区大小，决定内存上界（与 body 大小无关）。
-	WriteBuffer int
+	// Server keep-alive 空闲连接回收（D-P3 背板）：只影响请求间空闲连接，
+	// 对流式响应零影响（WriteTimeout 仍不设）。
+	IdleTimeout time.Duration
 }
 
 const (
 	defaultMaxBytes = 128 << 20 // 128 MiB：覆盖 1M tokens 上下文并留出多模态余量
 	defaultGzipOver = 64 << 10
+
+	defaultMemBudget  = 256 << 20 // 256 MB：100 QPS × avg 4.4s ≈ 183 MB，留余量
+	defaultWorkers    = 2         // gzip 326 KB ≈ 4-8 ms/条 → 单 worker 125-250 条/s
+	defaultQueueCap   = 256
+	defaultConnsHost  = 2048 // 转发侧背板：超限排队而非新建连接，≈465 QPS 持续
+	defaultIdleBackup = 120 * time.Second
 )
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Listen:        env("LISTEN", "127.0.0.1:3090"),
-		DashcamDir:    env("DASHCAM_DIR", "./data/dashcam"),
-		MaxRequest:    envInt64("MAX_REQUEST_BYTES", defaultMaxBytes),
-		MaxResponse:   envInt64("MAX_RESPONSE_BYTES", defaultMaxBytes),
-		GzipOver:      envInt64("GZIP_THRESHOLD", defaultGzipOver),
-		HeaderTimeout: envDuration("UPSTREAM_HEADER_TIMEOUT", 300*time.Second),
-		WriteBuffer:   32 << 10,
+		Listen:          env("LISTEN", "127.0.0.1:3090"),
+		DashcamDir:      env("DASHCAM_DIR", "./data/dashcam"),
+		MaxRequest:      envInt64("MAX_REQUEST_BYTES", defaultMaxBytes),
+		MaxResponse:     envInt64("MAX_RESPONSE_BYTES", defaultMaxBytes),
+		GzipOver:        envInt64("GZIP_THRESHOLD", defaultGzipOver),
+		HeaderTimeout:   envDuration("UPSTREAM_HEADER_TIMEOUT", 300*time.Second),
+		MemBudget:       envInt64("DASHCAM_MEM_BUDGET", defaultMemBudget),
+		FlushWorkers:    int(envInt64("DASHCAM_FLUSH_WORKERS", defaultWorkers)),
+		QueueCap:        int(envInt64("DASHCAM_QUEUE_CAP", defaultQueueCap)),
+		MaxConnsPerHost: int(envInt64("UPSTREAM_MAX_CONNS_PER_HOST", defaultConnsHost)),
+		IdleTimeout:     envDuration("IDLE_TIMEOUT", defaultIdleBackup),
 	}
 
 	rawUpstream := env("UPSTREAM", "http://127.0.0.1:3000")
@@ -72,6 +90,23 @@ func loadConfig() (config, error) {
 	if cfg.SampleModulus > 0 && (cfg.SampleKeep < 1 || cfg.SampleKeep > cfg.SampleModulus) {
 		return cfg, fmt.Errorf("SAMPLE_KEEP 必须在 1–SAMPLE_MODULUS 之间（当前 K=%d N=%d）",
 			cfg.SampleKeep, cfg.SampleModulus)
+	}
+
+	// 资源围栏参数：0 预算 = 停采总开关（合法），其余必须为正。
+	if cfg.MemBudget < 0 {
+		return cfg, fmt.Errorf("DASHCAM_MEM_BUDGET 必须为非负整数（0 = 停止采集）")
+	}
+	if cfg.FlushWorkers < 1 || cfg.FlushWorkers > 64 {
+		return cfg, fmt.Errorf("DASHCAM_FLUSH_WORKERS 必须在 1–64 之间（当前 %d）", cfg.FlushWorkers)
+	}
+	if cfg.QueueCap < 1 || cfg.QueueCap > 65536 {
+		return cfg, fmt.Errorf("DASHCAM_QUEUE_CAP 必须在 1–65536 之间（当前 %d）", cfg.QueueCap)
+	}
+	if cfg.MaxConnsPerHost < 1 || cfg.MaxConnsPerHost > 1_000_000 {
+		return cfg, fmt.Errorf("UPSTREAM_MAX_CONNS_PER_HOST 必须为正整数（当前 %d）", cfg.MaxConnsPerHost)
+	}
+	if cfg.IdleTimeout < 0 {
+		return cfg, fmt.Errorf("IDLE_TIMEOUT 必须为非负时长")
 	}
 	return cfg, nil
 }

@@ -85,6 +85,11 @@ docker build --build-arg VERSION=v0.1.0 -t new-api-dashcam:v0.1.0 .
 | `GZIP_THRESHOLD` | 64 KiB | `0` 关闭压缩，仅建议排障时使用 |
 | `SAMPLE_MODULUS` | `0`（关闭） | 按调用方指纹整体抽样（D-P2）：`sha256(指纹) % N < K` 才采集，被抽中指纹全量记录；`0` = 全量记录。启用时须 `1 ≤ SAMPLE_KEEP ≤ SAMPLE_MODULUS`，否则启动失败 |
 | `SAMPLE_KEEP` | `1` | 抽样保留数 K（见上行）；小调用方数量下粒度是「抽中几个指纹」而非精确比例 |
+| `DASHCAM_MEM_BUDGET` | 256 MB | 采集缓冲字节预算（D-P3）；超限三层降级，只丢采集不丢转发；`0` = 停采总开关（热停采集，无需重新部署） |
+| `DASHCAM_FLUSH_WORKERS` | `2` | 落盘 worker 数（压缩/索引/正则都在 worker 上） |
+| `DASHCAM_QUEUE_CAP` | `256` | 待落盘队列容量（条）；队满丢弃并计入 `/healthz` 的 `dropped` |
+| `UPSTREAM_MAX_CONNS_PER_HOST` | `2048` | 上游每主机连接上限；超限排队等待而非新建连接 |
+| `IDLE_TIMEOUT` | `120s` | keep-alive 空闲连接回收；不影响流式响应（WriteTimeout 仍不设） |
 
 ### 3.1 看板侧配置（读取）
 

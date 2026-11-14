@@ -10,8 +10,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"os"
 )
 
 // usageScanWindow 只扫响应尾部：usage 出现在 JSON 末尾对象或 SSE 末尾的块里。
@@ -31,33 +29,17 @@ func (u tokenUsage) empty() bool {
 	return u.prompt == 0 && u.completion == 0 && u.cached == 0 && u.cacheWrite == 0
 }
 
-// extractUsageFromFile 读响应正文尾部并提取 usage；任何错误都返回空值（索引省略字段）。
-func extractUsageFromFile(path string) tokenUsage {
-	text, err := readFileTail(path, usageScanWindow)
-	if err != nil || len(text) == 0 {
+// extractUsageFromFile 已随 D-P3 移除：落盘异步化后 usage 在 worker 直接从
+// 响应内存缓冲的尾部窗口提取（usageTail），不再读回磁盘临时文件。
+// usageTail 从响应缓冲的尾部窗口提取 usage；空缓冲返回空值（索引省略字段）。
+func usageTail(buf []byte) tokenUsage {
+	if len(buf) == 0 {
 		return tokenUsage{}
 	}
-	return extractUsage(text)
-}
-
-func readFileTail(path string, max int64) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+	if int64(len(buf)) > usageScanWindow {
+		buf = buf[int64(len(buf))-usageScanWindow:]
 	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if st.Size() <= max {
-		return io.ReadAll(f)
-	}
-	buf := make([]byte, max)
-	if _, err := f.ReadAt(buf, st.Size()-max); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return extractUsage(buf)
 }
 
 // extractUsage 扫描正文里所有 `"usage":{...}` 对象并按字段合并（每字段取最后一个非零值）：

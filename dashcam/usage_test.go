@@ -84,38 +84,22 @@ func TestExtractUsageEdgeCases(t *testing.T) {
 	}
 }
 
-func TestReadFileTail(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "res.tmp")
-	content := []byte("0123456789")
-	if err := os.WriteFile(path, content, 0o640); err != nil {
-		t.Fatal(err)
+func TestUsageTail(t *testing.T) {
+	// D-P3：usage 数据源从磁盘 .tmp 尾部换成内存缓冲尾部，窗口口径不变。
+	full := []byte(`{"usage":{"prompt_tokens":7,"completion_tokens":3}}`)
+	if got := usageTail(full); got != (tokenUsage{prompt: 7, completion: 3}) {
+		t.Fatalf("small buffer: got %+v", got)
 	}
 
-	whole, err := readFileTail(path, 100)
-	if err != nil || string(whole) != string(content) {
-		t.Fatalf("small file: got %q err=%v", whole, err)
+	// 尾部窗口之外的 usage 会缺失（超长响应的刻意取舍）
+	long := append([]byte(`{"usage":{"prompt_tokens":1}},`), make([]byte, usageScanWindow)...)
+	long = append(long, full...)
+	if got := usageTail(long); got != (tokenUsage{prompt: 7, completion: 3}) {
+		t.Fatalf("windowed buffer: got %+v", got)
 	}
-	tail, err := readFileTail(path, 4)
-	if err != nil || string(tail) != "6789" {
-		t.Fatalf("tail: got %q err=%v", tail, err)
-	}
-	if _, err := readFileTail(filepath.Join(dir, "missing"), 10); err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
 
-func TestExtractUsageFromFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "res.tmp")
-	if err := os.WriteFile(path, []byte(`{"usage":{"prompt_tokens":7,"completion_tokens":3}}`), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if got := extractUsageFromFile(path); got != (tokenUsage{prompt: 7, completion: 3}) {
-		t.Fatalf("got %+v", got)
-	}
-	// 缺失的文件：空 usage，不报错（采集链路绝不因提取失败而中断）
-	if got := extractUsageFromFile(filepath.Join(dir, "missing")); !got.empty() {
-		t.Fatalf("missing file should give empty usage, got %+v", got)
+	// 空缓冲：空 usage（预算停缓冲的记录没有响应体，索引省略字段）
+	if got := usageTail(nil); !got.empty() {
+		t.Fatalf("empty buffer should give empty usage, got %+v", got)
 	}
 }
