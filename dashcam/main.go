@@ -46,6 +46,9 @@ func main() {
 		// 记录目录不可用时仍然启动：宁可丢采集，也不能丢转发。
 		logEvent("error", "dashcam_dir_unavailable", map[string]any{"dir": cfg.DashcamDir, "error": err.Error()})
 		sink = nil
+	} else if err := writeSamplingMeta(cfg); err != nil {
+		// 抽样状态供看板展示统一口径提示；写失败只影响提示，不影响转发与采集。
+		logEvent("warn", "sampling_meta_failed", map[string]any{"error": err.Error()})
 	}
 
 	h := &handler{cfg: cfg, sink: sink, proxy: newProxy(cfg)}
@@ -109,16 +112,22 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var rec *record
 	if h.sink != nil && h.cfg.shouldCapture(r.URL.Path) {
-		rec = h.sink.begin(r)
-		if rec != nil {
-			body := r.Body
-			r.Body = struct {
-				io.Reader
-				io.Closer
-			}{io.TeeReader(body, writerFunc(rec.writeRequest)), body}
-			h.captured.Add(1)
+		// 抽样判定（D-P2）在 begin 之前：未抽中的指纹完全不落盘，只进 skipped 计数。
+		fp := tokenFingerprint(r.Header.Get("Authorization"))
+		if h.cfg.sampled(fp) {
+			rec = h.sink.begin(r, fp)
+			if rec != nil {
+				body := r.Body
+				r.Body = struct {
+					io.Reader
+					io.Closer
+				}{io.TeeReader(body, writerFunc(rec.writeRequest)), body}
+				h.captured.Add(1)
+			} else {
+				h.failed.Add(1)
+			}
 		} else {
-			h.failed.Add(1)
+			h.skipped.Add(1)
 		}
 	} else {
 		h.skipped.Add(1)

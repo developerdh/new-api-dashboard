@@ -83,6 +83,8 @@ docker build --build-arg VERSION=v0.1.0 -t new-api-dashcam:v0.1.0 .
 | `CAPTURE_PATHS` | 四个对话路径 | 新增协议时在此追加，其余路径直接放行 |
 | `MAX_REQUEST_BYTES` / `MAX_RESPONSE_BYTES` | 128 MiB | 磁盘防御阈值 |
 | `GZIP_THRESHOLD` | 64 KiB | `0` 关闭压缩，仅建议排障时使用 |
+| `SAMPLE_MODULUS` | `0`（关闭） | 按调用方指纹整体抽样（D-P2）：`sha256(指纹) % N < K` 才采集，被抽中指纹全量记录；`0` = 全量记录。启用时须 `1 ≤ SAMPLE_KEEP ≤ SAMPLE_MODULUS`，否则启动失败 |
+| `SAMPLE_KEEP` | `1` | 抽样保留数 K（见上行）；小调用方数量下粒度是「抽中几个指纹」而非精确比例 |
 
 ### 3.1 看板侧配置（读取）
 

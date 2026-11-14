@@ -57,6 +57,7 @@ dashboard :3088 ── 读 data/dashcam（:ro 挂载）── 渲染会话
 
 ```text
 $DASHCAM_DIR/
+├─ meta.json                      # 代理启动时写入的抽样状态（D-P2，见 §4.4）
 ├─ blobs/
 │  └─ 2026-11-13/                 # 按天分目录：便于整目录清理与按日期定位
 │     └─ 6981744f7254/            # 调用方指纹：sha256(Authorization) 前 12 位
@@ -101,6 +102,16 @@ fp = sha256("Bearer sk-" + tokens.key)[:12]
 
 写入流程：`<name>.req.tmp` → 关闭 → （可选 gzip）→ `rename` 到 `<name>.req`。
 同目录 `rename` 在 POSIX 下原子，读取方不会看到半个文件。索引行在 `rename` 之后追加，避免索引指向不存在的文件。
+
+### 4.4 抽样状态（meta.json，D-P2）
+
+代理启动时把抽样配置覆盖写入 `$DASHCAM_DIR/meta.json`，看板只读读取后展示统一口径提示（避免看板/代理两处配置漂移）：
+
+```json
+{ "sampling_enabled": false, "sample_modulus": 0, "sample_keep": 1 }
+```
+
+文件缺失 = 视为未开启（兼容未升级的旧代理）；解析失败同样按未开启处理，只影响提示、不影响列表。抽样判定本身在代理侧 `shouldCapture` 之前完成：`sha256(指纹) % N < K` 采集，未命中只进 `skipped` 计数（设计与限制见 [06-performance-plan.md](06-performance-plan.md) §12）。
 
 ## 5. 索引格式
 
