@@ -61,7 +61,7 @@ docker build --build-arg VERSION=v0.1.0 -t new-api-dashcam:v0.1.0 .
 |---|---|
 | 静态检查 | `go vet` + `gofmt -l` 必须为空 |
 | 交叉编译 | linux/amd64、linux/arm64 |
-| 打包 | 二进制 + `new-api-dashcam.service` + `dashcam.env.example` + `README.md` |
+| 打包 | 二进制 + `new-api-dashcam.service` + `dashcam.env.example` + `clean-dashcam.sh` + `README.md` |
 | 冒烟 | 在干净环境执行 `-version`，并断言 `file` 输出为 `statically linked` |
 | 上传 | `*.tar.gz` 与 `SHA256SUMS` |
 
@@ -307,20 +307,78 @@ systemctl start new-api-dashcam
 
 | 项 | 估算 |
 |---|---|
-| 每请求文件 | 2 |
+| 每请求文件 | 2（D-P5 段式打包后为每天几十个段文件，见 [06-performance-plan.md](06-performance-plan.md) §13） |
 | 每天文件 | 约 1.1 万（按 5.6k 请求/天） |
 | 每年文件 | 约 400 万 |
 | 索引 | 约 1.1 MB/天 |
 
-必须按日期目录清理。建议保留 90 天：
+### 7.1 清理脚本（clean-dashcam.sh）
+
+随发布包提供（D-P1，[06-performance-plan.md](06-performance-plan.md) §14）。**不部署脚本 / 不配调度则维持现状（无清理）**；组件自身不内置清理逻辑，由运维决定调度方式。
 
 ```bash
-# 清理脚本尚未实现，此为手工参考命令；执行前先 dry-run
-find "$DASHCAM_DIR/blobs" -maxdepth 1 -type d -mtime +90 -print
-find "$DASHCAM_DIR/index" -maxdepth 1 -type f -mtime +90 -print
+# dry-run：只打印待删清单与体积，不做任何改动（默认行为）
+DASHCAM_DIR=/var/lib/new-api-dashboard/dashcam /opt/dashcam/clean-dashcam.sh
+
+# 确认无误后实际删除（--confirm 必须显式给出）
+DASHCAM_DIR=/var/lib/new-api-dashboard/dashcam /opt/dashcam/clean-dashcam.sh --confirm
 ```
 
-清理任务必须与看板的保留口径一致，且需要同时清理 `.tmp` 残留（采集中断会留下临时文件）。
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `DASHCAM_DIR` | 无（必填） | 记录根目录；位置参数可覆盖 |
+| `DASHCAM_RETENTION_DAYS` | `90` | 保留天数；`0` = 禁用清理 |
+
+行为与安全边界：
+
+- 删除对象 = 早于保留期的 `blobs/<YYYY-MM-DD>/` 整目录 + 同寿命的 `index/<YYYY-MM-DD>.ndjson`；过期与否按**目录名中的日期**判定（不看 mtime）。
+- 同时回收 `blobs/`、`index/` 下的 `*.tmp` 残留（采集中断产物，含 `.gz.tmp`），残留回收不区分日期。
+- 非 `YYYY-MM-DD` 命名的目录/文件一律不动并逐条提示，等人工确认。
+- 全部待删路径由脚本按 `DASHCAM_DIR` 构造并经日期格式校验，不接收外部路径。
+- 保留期应大于看板查询窗口上限（`DASHCAM_MAX_WINDOW_DAYS` 默认 31），90 天留有余量；配置 ≤31 时脚本告警。
+
+### 7.2 调度示例（systemd timer）
+
+清理脚本以 `new-api-dashcam` 用户运行（记录目录属主，删除无需 root）：
+
+```ini
+# /etc/systemd/system/clean-dashcam.service
+[Unit]
+Description=Clean expired new-api-dashcam capture data
+
+[Service]
+Type=oneshot
+User=new-api-dashcam
+EnvironmentFile=/etc/dashcam.env
+ExecStart=/opt/dashcam/clean-dashcam.sh --confirm
+```
+
+```ini
+# /etc/systemd/system/clean-dashcam.timer
+[Unit]
+Description=Run clean-dashcam daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now clean-dashcam.timer
+```
+
+`EnvironmentFile=/etc/dashcam.env` 复用代理的配置文件，脚本只读其中的 `DASHCAM_DIR` 与 `DASHCAM_RETENTION_DAYS`。
+
+### 7.3 调度示例（cron）
+
+```cron
+# 每天 04:30 清理，保留 90 天；先手动 dry-run 确认过再上线
+30 4 * * * new-api-dashcam  DASHCAM_DIR=/var/lib/new-api-dashboard/dashcam  /opt/dashcam/clean-dashcam.sh --confirm >> /var/log/dashcam-clean.log 2>&1
+```
 
 ## 8. 回滚
 
@@ -341,7 +399,7 @@ find "$DASHCAM_DIR/index" -maxdepth 1 -type f -mtime +90 -print
 | 上游拨号失败时请求体不落盘 | 索引 `rq=0` | 不影响排障，`e` 字段含完整错误 |
 | 代理无法获知 `user_id` | 目录按调用方指纹分组 | 看板按 `tokens.key` 反查，见 [02-design.md](02-design.md) §4.2 |
 | 客户端断开可能留下半截响应 | 正文不完整 | 索引 `tr` 位与 `s` 可辅助判断 |
-| 清理脚本未实现 | 长期运行磁盘持续增长 | 见 §7，需人工或外部定时任务 |
+| 清理脚本未部署 | 长期运行磁盘持续增长 | 随发布包提供 `clean-dashcam.sh`（§7），是否部署与调度由运维决定 |
 | 看板缺少 `tokens` 读权限 | 会话列表为空并提示"无法反查指纹" | 按 §3.1 授权；无权限时降级，不报 500 |
 | 指纹前缀与调用方不一致 | 该 token 的会话全部查不到（漏配，不会错配） | 核对 `DASHCAM_TOKEN_HEADER_PREFIX` |
 | nginx failover 未经生产验证 | 首次上线存在未知行为 | 按 §5.4 顺序灰度，先观察 error.log |
