@@ -14,8 +14,14 @@
  * - 与上一轮不连续（历史被裁剪 / 并发分支）时明确提示，而不是假装是同一串上下文。
  */
 import { ChevronRight, Loader2, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
+import {
+  blockMatches,
+  isDefaultFilter,
+  MessageFilterBar,
+  type BlockFilter,
+} from "@/components/audit/audit-message-filters";
 import { StatusBadge, Tag } from "@/components/audit/badges";
 import { MessageBlock } from "@/components/audit/message-block";
 import { Button } from "@/components/ui/button";
@@ -88,11 +94,14 @@ function DeltaHint({ detail, turn }: { detail: AuditSessionDetail; turn: AuditTh
 function TurnBody({
   userId,
   turn,
-  keyword,
+  filter,
+  highlight,
 }: {
   userId: string;
   turn: AuditThreadTurn;
-  keyword: string;
+  filter: BlockFilter;
+  /** 已 trim 的关键词，仅用于命中高亮。 */
+  highlight: string;
 }) {
   const [rawOpen, setRawOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
@@ -128,9 +137,15 @@ function TurnBody({
   if (api.data === undefined) return null;
 
   const { envelope } = api.data;
+  const filtering = !isDefaultFilter(filter);
   const news = api.data.delta?.news ?? envelope.request.messages;
   const { replay, fresh } = splitNews(news);
   const outputs = envelope.response.outputs;
+  // 过滤只隐藏不匹配的内容块，分节结构与计数照旧，避免"筛完不知道少了什么"
+  const match = (block: AuditBlock): boolean => blockMatches(block, filter);
+  const freshShown = filtering ? fresh.filter(match) : fresh;
+  const outputsShown = filtering ? outputs.filter(match) : outputs;
+  const replayShown = filtering ? replay.filter(match) : replay;
   const parseError = envelope.request.parseError ?? envelope.response.parseError;
   const usage = envelope.response.usage;
 
@@ -156,7 +171,11 @@ function TurnBody({
             </button>
           }
         >
-          {rawOpen ? "原始报文" : `本轮输入 · ${fresh.length} 项`}
+          {rawOpen
+            ? "原始报文"
+            : filtering
+              ? `本轮输入 · 命中 ${freshShown.length} / ${fresh.length} 项`
+              : `本轮输入 · ${fresh.length} 项`}
         </SectionTitle>
 
         {rawOpen ? (
@@ -178,22 +197,25 @@ function TurnBody({
                   className="w-full rounded-lg border border-dashed px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/40"
                 >
                   上下文回放 {replay.length} 项（系统提示 / 上一轮回答）
+                  {filtering ? ` · 命中 ${replayShown.length}` : ""}
                   {replayOpen ? " · 点击收起" : " · 点击展开"}
                 </button>
                 {replayOpen
-                  ? replay.map((block) => (
-                      <MessageBlock key={`r-${block.seq}`} block={block} keyword={keyword} />
+                  ? replayShown.map((block) => (
+                      <MessageBlock key={`r-${block.seq}`} block={block} keyword={highlight} />
                     ))
                   : null}
               </>
             )}
-            {fresh.length === 0 ? (
+            {freshShown.length === 0 ? (
               <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
-                本轮没有新增输入（可能是重试或工具结果续接，见回放）。
+                {filtering
+                  ? "当前筛选条件下没有本轮输入。"
+                  : "本轮没有新增输入（可能是重试或工具结果续接，见回放）。"}
               </p>
             ) : (
-              fresh.map((block) => (
-                <MessageBlock key={`f-${block.seq}`} block={block} keyword={keyword} />
+              freshShown.map((block) => (
+                <MessageBlock key={`f-${block.seq}`} block={block} keyword={highlight} />
               ))
             )}
           </div>
@@ -202,7 +224,7 @@ function TurnBody({
 
       <div>
         <SectionTitle aside={<span className="text-[11px] font-normal">{turn.stream ? "流式" : "JSON"}</span>}>
-          本轮响应 · {outputs.length} 项
+          {filtering ? `本轮响应 · 命中 ${outputsShown.length} / ${outputs.length} 项` : `本轮响应 · ${outputs.length} 项`}
         </SectionTitle>
         {envelope.response.error === undefined ? null : (
           <div className="mb-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-6">
@@ -213,14 +235,14 @@ function TurnBody({
             {envelope.response.error.message}
           </div>
         )}
-        {outputs.length === 0 && envelope.response.error === undefined ? (
+        {outputsShown.length === 0 && envelope.response.error === undefined ? (
           <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
-            无返回内容（可能被截断或非对话接口）。
+            {filtering ? "当前筛选条件下没有返回内容。" : "无返回内容（可能被截断或非对话接口）。"}
           </p>
         ) : (
           <div className="flex flex-col gap-2">
-            {outputs.map((block) => (
-              <MessageBlock key={`o-${block.seq}`} block={block} keyword={keyword} />
+            {outputsShown.map((block) => (
+              <MessageBlock key={`o-${block.seq}`} block={block} keyword={highlight} />
             ))}
           </div>
         )}
@@ -247,13 +269,15 @@ function TurnCard({
   turn,
   open,
   onToggle,
-  keyword,
+  filter,
+  highlight,
 }: {
   userId: string;
   turn: AuditThreadTurn;
   open: boolean;
   onToggle: () => void;
-  keyword: string;
+  filter: BlockFilter;
+  highlight: string;
 }) {
   return (
     <div className={`rounded-xl border ${open ? "bg-card" : "bg-card/60"}`}>
@@ -282,7 +306,7 @@ function TurnCard({
           {formatBytes(turn.requestBytes)} → {formatBytes(turn.responseBytes)}
         </span>
       </button>
-      {open ? <TurnBody userId={userId} turn={turn} keyword={keyword} /> : null}
+      {open ? <TurnBody userId={userId} turn={turn} filter={filter} highlight={highlight} /> : null}
     </div>
   );
 }
@@ -301,7 +325,19 @@ export function AuditThreadDialog({
   onClose: () => void;
 }) {
   const sessionKey = conversation?.sessionKey;
+  const [filter, setFilter] = useState<BlockFilter>({ role: "all", kind: "all", query: "" });
   const [keywordInput, setKeywordInput] = useState("");
+  // 防抖：输入停顿 180ms 后再过滤，与详情抽屉一致，避免长会话逐键全量扫描
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilter((current) => ({ ...current, query: keywordInput.trim().toLowerCase() }));
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [keywordInput]);
+  const resetFilters = (): void => {
+    setFilter({ role: "all", kind: "all", query: "" });
+    setKeywordInput("");
+  };
   // 全屏是视图偏好，切换会话时保持——习惯全屏看长报文的人不会想每次都退回去
   const [full, setFull] = useState(false);
   /**
@@ -327,7 +363,6 @@ export function AuditThreadDialog({
   const api = useApi<AuditThread>(url);
   const turns = api.data?.turns ?? [];
   const lastIndex = turns.length === 0 ? 0 : (turns.at(-1)?.index ?? 0);
-  const keyword = keywordInput.trim();
 
   return (
     <Dialog
@@ -377,12 +412,6 @@ export function AuditThreadDialog({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <input
-              value={keywordInput}
-              onChange={(event) => setKeywordInput(event.target.value)}
-              placeholder="在已展开的轮次中搜索"
-              className="h-7 w-40 rounded-md border border-input bg-transparent px-2 text-[11px] outline-none focus-visible:border-ring"
-            />
             <Button
               type="button"
               size="icon"
@@ -405,6 +434,17 @@ export function AuditThreadDialog({
               <X className="size-4" />
             </Button>
           </div>
+        </div>
+
+        <div className="border-b px-5 py-1.5">
+          <MessageFilterBar
+            filter={filter}
+            queryInput={keywordInput}
+            onFilterChange={(patch) => setFilter((current) => ({ ...current, ...patch }))}
+            onQueryInputChange={setKeywordInput}
+            onReset={resetFilters}
+            searchPlaceholder="在已展开的轮次中搜索"
+          />
         </div>
 
         <div className="flex-1 overflow-auto px-5 py-4">
@@ -438,7 +478,8 @@ export function AuditThreadDialog({
                   userId={userId}
                   turn={turn}
                   open={override[turn.index] ?? turn.index === lastIndex}
-                  keyword={keyword}
+                  filter={filter}
+                  highlight={keywordInput.trim()}
                   onToggle={() =>
                     setOverride(turn.index, !(override[turn.index] ?? turn.index === lastIndex))
                   }
