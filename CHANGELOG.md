@@ -6,34 +6,21 @@
 
 ### 新增
 
-- **采集数据清理脚本（clean-dashcam.sh，D-P1）**：随 dashcam 发布包提供，按日期目录整体删除
-  早于保留期（`DASHCAM_RETENTION_DAYS`，默认 90 天、`0` 禁用）的 blobs 与同寿命日索引，并回收
-  `.tmp` 残留；默认 dry-run，显式 `--confirm` 才删除。调度示例（systemd timer / cron）见
-  `docs/dashcam/03-deployment.md` §7。
-- **按调用方指纹比例抽样（D-P2）**：代理新增 `SAMPLE_MODULUS` / `SAMPLE_KEEP`
-  （`sha256(指纹) % N < K` 判定，默认关闭 = 全量记录），被抽中指纹全量记录、未抽中不落盘；
-  启动时把抽样状态写入 `DASHCAM_DIR/meta.json`，看板会话列表据此展示统一口径提示
-  （未抽中的调用方不产生任何记录，总量以 New API 主库为准）。
-- **落盘异步化 + 资源围栏（D-P3）**：转发 goroutine 只做内存缓冲与非阻塞入队，
-  落盘/压缩/索引/正则全部移入后台 worker（`DASHCAM_FLUSH_WORKERS=2`、队列
-  `DASHCAM_QUEUE_CAP=256` 有界满则丢弃），磁盘抖动不再影响 LLM 请求；
-  全局内存预算 `DASHCAM_MEM_BUDGET`（默认 256 MB，`0` = 停采总开关）三层降级
-  （拒收新请求 → 在途停缓冲 → 丢记录），`/healthz` 新增 `dropped` 与
-  `buffered_bytes`；新增转发侧背板 `UPSTREAM_MAX_CONNS_PER_HOST` 与
-  `IDLE_TIMEOUT`；磁盘格式零变化，新旧二进制可随时互换回滚。
-- **段式打包（D-P5）**：blob 写侧改为 `blobs/<date>/<fp>/seg-<HH>-<seq>.pack`
-  顺序追加（定长二进制头 + req/res payload，req/res 各自独立 gzip），去掉 tmp
-  文件与 rename，文件数从 2N/天降到每天几十个段；索引新增 `seg`/`off`/`ln`
-  定位字段，无 `seg` 的旧行走旧两文件路径，**新旧并存、不做数据迁移**；
-  崩溃只丢段尾半条（长度头可跳过，无索引行、不可见）；看板读取侧 1 次 open +
-  按需 pread。
 - **提示词与响应采集（new-api-dashcam）**：独立 Go 前置代理，把白名单对话接口的请求与响应原样落盘
-  （按天 NDJSON 索引 + blob 文件），转发零第三方依赖，仅丢采集不丢调用。
-  - 索引含模型、状态、耗时、截断位、会话键哈希（`k`）与 token 用量（`pt`/`ct`/`cc`/`cw`，
-    落索引前从响应尾部提取）；
-  - 支持 gzip、128 MiB 截断、systemd / Docker 部署与独立发布流水线；
-  - nginx `backup` failover 兜底：代理不可用时回落直连，只丢采集不丢调用；
-  - token 提取口径由共享契约样例 + Go / TS 双侧测试锁定。
+  （按天 NDJSON 索引 + blob 文件），转发零第三方依赖，仅丢采集不丢调用；支持 systemd / Docker
+  部署与独立发布流水线，nginx `backup` failover 兜底（代理不可用时自动回落直连）。
+  - 索引含模型、状态、耗时、截断位、会话键哈希与 token 用量；超长报文按 `MAX_REQUEST_BYTES` /
+    `MAX_RESPONSE_BYTES` 截断（默认 128 MiB，覆盖 1M tokens 上下文）；
+  - 记录范围可按调用方指纹比例抽样（`SAMPLE_MODULUS` / `SAMPLE_KEEP`，默认关闭 = 全量记录）；
+    抽样状态启动时写入 `DASHCAM_DIR/meta.json`，看板会话列表据此展示统一口径提示
+    （未抽中的调用方无记录，总量以 New API 主库为准）；
+  - 落盘异步化：压缩 / 索引 / 落盘移入后台 worker，磁盘抖动不再影响 LLM 请求；内存预算
+    `DASHCAM_MEM_BUDGET`（默认 256 MB，`0` = 停采总开关）兜底，`/healthz` 暴露 `dropped` /
+    `buffered_bytes`；
+  - 存储按段顺序打包，文件数从每天 2N 降到几十个；新旧格式并存、不做数据迁移，崩溃只丢段尾半条；
+  - 清理脚本 `clean-dashcam.sh`：按保留期（`DASHCAM_RETENTION_DAYS`，默认 90 天、`0` 禁用）删除
+    过期 blobs 与日索引；默认 dry-run，显式 `--confirm` 才删除；调度示例见
+    `docs/dashcam/03-deployment.md` §7。
 - **会话查看**：用户详情新增「会话」卡片与右侧抽屉，展示采集到的提示词与模型返回。
   - 抽屉分结构化 / 原始报文 / 事件流三页签，覆盖四种协议、错误体与截断标记；
   - 角色界定：代理只存指纹，看板按 `tokens.key` 重算指纹做确定性归属；
@@ -51,11 +38,15 @@
 
 - **导出入口合并**：排行卡片的两个导出图标合并为一个下载下拉菜单（图表 HTML / 明细 CSV）。
 
+### 修复
+
+- **会话列表切换反馈**：切换日期 / 粒度 / 翻页等口径期间立即显示加载骨架，不再悬挂上一口径内容；
+  独立列表页过渡期不再误显「无采集记录」。手动刷新行为不变。
+
 ### 说明
 
 - 监控记录只读挂载（`DASHCAM_DIR`），不写数据库；记录目录不可用时看板降级提示，不报错。
 - 索引 token 字段可选：旧数据显示 —，或按 `DASHCAM_USAGE_HYDRATE_MAX`（默认 100）读时水合兜底。
-- `MAX_REQUEST_BYTES` / `MAX_RESPONSE_BYTES` 默认 128 MiB（覆盖 1M tokens 上下文）。
 
 ## [0.1.1] - 2026-11-12
 
