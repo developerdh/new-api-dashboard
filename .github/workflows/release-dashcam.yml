@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 提取 tag 附注作为发布说明需要本地有 annotated tag 对象
+          fetch-tags: true
 
       - uses: actions/setup-go@v5
         with:
@@ -38,6 +41,21 @@ jobs:
           # 版本须以 v 开头，保证产物命名与 tag（dashcam-v*）口径一致
           case "$VALUE" in v*) ;; *) echo "::error::版本号须以 v 开头，如 v0.1.0"; exit 1;; esac
           echo "value=$VALUE" >> "$GITHUB_OUTPUT"
+
+      # 发布说明取 tag 附注，而不是 GitHub 自动生成——自动生成的对比区间会在
+      # 看板（v*）与 dashcam（dashcam-v*）两套 tag 命名空间之间串线（实测首发时
+      # 对比到了看板 v0.1.1，并把 PR 合并记录当成了发布内容）。附注缺失时给兜底文案。
+      - name: 提取 tag 附注作为发布说明
+        run: |
+          TAG="dashcam-${{ steps.v.outputs.value }}"
+          NOTES=""
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [ "$(git cat-file -t "$TAG")" = "tag" ]; then
+            NOTES="$(git tag -l --format='%(contents)' "$TAG")"
+          fi
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="dashcam ${{ steps.v.outputs.value }} 发布。部署与配置见仓库 docs/dashcam/03-deployment.md。"
+          fi
+          printf '%s\n' "$NOTES" > release-body.md
 
       - name: 静态检查
         working-directory: dashcam
@@ -84,5 +102,5 @@ jobs:
           files: |
             dashcam/dist/*.tar.gz
             dashcam/dist/SHA256SUMS
-          generate_release_notes: true
+          body_path: release-body.md
           fail_on_unmatched_files: true
