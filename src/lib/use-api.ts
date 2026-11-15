@@ -39,12 +39,19 @@ export interface UseApiResult<T> {
   meta: ApiMetaPayload | undefined;
   error: ApiErrorPayload | undefined;
   loading: boolean;
+  /**
+   * 产出当前 `data` 的请求 URL。请求切换（url 变化）期间保留旧 `data` 以免闪烁，
+   * 此时 `dataUrl !== url`——调用方可据此识别「过渡期展示的是上一口径的旧值」，
+   * 落到加载态而不是把旧口径内容继续挂出来。
+   */
+  dataUrl: string | null;
   refresh: () => void;
 }
 
 export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseApiResult<T> {
   const { refetchInterval = 0, enabled = true } = options;
   const [data, setData] = useState<T | undefined>(undefined);
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<ApiMetaPayload | undefined>(undefined);
   const [error, setError] = useState<ApiErrorPayload | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(url !== null && enabled);
@@ -91,6 +98,7 @@ export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseA
           );
         } else {
           setData(body.data);
+          setDataUrl(url);
           setMeta(body.meta);
           setError(undefined);
         }
@@ -119,5 +127,5 @@ export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseA
     };
   }, [enabled, nonce, refetchInterval, url]);
 
-  return { data, meta, error, loading, refresh };
+  return { data, meta, error, loading, dataUrl, refresh };
 }

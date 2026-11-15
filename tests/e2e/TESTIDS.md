@@ -35,6 +35,7 @@
 | `sessions-page` | 独立列表页根节点 | `src/app/(console)/users/[id]/sessions/sessions-client.tsx` | 确认独立页渲染 | T7 |
 | `sessions-load-state` | 独立页页脚「已加载 N」 | `sessions-client.tsx` | 累加加载计数断言 | T7 |
 | `sessions-load-more` | 「加载更多」按钮（可加载时才存在） | `sessions-client.tsx` | 累加加载动作 | T7 |
+| `sessions-loading` | 列表加载骨架（初始 / 切换日期等口径 / 翻页过渡态） | `dashcam-sessions.tsx`、`sessions-client.tsx`（两入口） | 断言切换筛选有加载反馈、空态不提前出现 | T4（可选） |
 | `sampling-notice` | 抽样口径提示条（仅抽样开启时渲染） | `src/components/dashcam/sampling-notice.tsx` | 断言提示出现/不出现 | T8 |
 
 ### 过滤条（`src/components/dashcam/session-filters.tsx`，两入口共用）
