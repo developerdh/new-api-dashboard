@@ -186,6 +186,10 @@ type record struct {
 	errMsg     string
 	// ms 在 finish 入队时刻定格：总耗时指转发耗时，不含队列等待。
 	ms int64
+
+	// finished 幂等保护（D6）：finish 现挂在 ServeHTTP 的 defer 里，panic 展开路径
+	// 与未来任何第二调用点都不得造成双入队/索引重复行。只在请求 goroutine 触碰，无需原子。
+	finished bool
 }
 
 // begin 只分配快照结构（纳秒级）：目录创建、文件命名与 trace 冲突处理全部搬到 flush。
@@ -308,7 +312,12 @@ func (r *record) setStatus(code int) { r.status = code }
 
 // finish 非阻塞入队后立即返回：转发路径到此为止，磁盘交给 worker。
 // 队满（三层降级第 3 层）丢弃整条记录——无索引行、无 blob，dropped 累计。
+// 幂等（D6）：重复调用直接返回，防止双入队/索引重复行。
 func (r *record) finish(errMsg string) {
+	if r.finished {
+		return
+	}
+	r.finished = true
 	r.errMsg = errMsg
 	r.ms = time.Since(r.start).Milliseconds()
 	select {

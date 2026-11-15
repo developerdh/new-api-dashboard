@@ -141,11 +141,21 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(context.WithValue(r.Context(), errorBoxKey, box))
 
 	tw := &teeWriter{ResponseWriter: w, rec: rec}
+	// D6：客户端在流式响应中途断开时，ReverseProxy 按设计 panic(http.ErrAbortHandler)，
+	// net/http 对该值静默恢复不写日志——finish 若留在 ServeHTTP 返回后的普通调用处，
+	// panic 展开会跳过它：记录既不入队也不释放预算（buffered_bytes 永久虚高）。
+	// 因此 finish 挂在 defer 里补记；recover 后原样上抛，连接收尾语义零变化
+	// （ErrAbortHandler 仍被静默恢复，其余 panic 照常由 net/http 记录）。
+	defer func() {
+		p := recover()
+		if rec != nil {
+			rec.finish(box.msg)
+		}
+		if p != nil {
+			panic(p)
+		}
+	}()
 	h.proxy.ServeHTTP(tw, r)
-
-	if rec != nil {
-		rec.finish(box.msg)
-	}
 }
 
 // serveHealth 输出存活与采集计数。dropped = 队满丢弃 + 在途预算停缓冲累计，
