@@ -57,6 +57,9 @@ type indexEntry struct {
 const (
 	truncRequest  = 1 << 0
 	truncResponse = 1 << 1
+	// truncClientAbort（D6）：客户端在响应流拷贝中途断开，记录为部分响应。
+	// 与尺寸截断（1/2）区分："流提前结束"不丢已收数据，"尺寸截断"是缓冲被裁剪。
+	truncClientAbort = 1 << 2
 )
 
 var (
@@ -176,6 +179,7 @@ type record struct {
 	resBuf  []byte
 	trunc   int
 	starved bool // 预算超限后停止缓冲本记录（三层降级第 2 层）
+	aborted bool // 客户端在响应拷贝中途断开（D6）：finish 时置 truncClientAbort 位
 
 	peek       []byte
 	model      string
@@ -319,6 +323,9 @@ func (r *record) finish(errMsg string) {
 	}
 	r.finished = true
 	r.errMsg = errMsg
+	if r.aborted {
+		r.trunc |= truncClientAbort
+	}
 	r.ms = time.Since(r.start).Milliseconds()
 	select {
 	case r.sink.queue <- r:
