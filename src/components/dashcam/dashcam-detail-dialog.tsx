@@ -229,6 +229,7 @@ export function DashcamDetailDialog({
                   {row.requestTruncated || row.responseTruncated ? (
                     <Tag tone="warning">截断</Tag>
                   ) : null}
+                  {row.clientAborted ? <Tag tone="warning">客户端中断</Tag> : null}
                   {row.model === "" ? null : <span className="text-[11px] text-muted-foreground">{row.model}</span>}
                 </>
               )}
@@ -314,7 +315,7 @@ export function DashcamDetailDialog({
                 />
                 <MetaItem
                   label="压缩 / 截断"
-                  value={`${row.gzip.request || row.gzip.response ? "gzip" : "无"} · tr=${(row.requestTruncated ? 1 : 0) + (row.responseTruncated ? 2 : 0)}`}
+                  value={`${row.gzip.request || row.gzip.response ? "gzip" : "无"} · tr=${(row.requestTruncated ? 1 : 0) + (row.responseTruncated ? 2 : 0) + (row.clientAborted ? 4 : 0)}`}
                 />
                 <MetaItem label="协议" value={row.protocol} />
                 <MetaItem label="客户端 IP" value={row.ip ?? "—"} />

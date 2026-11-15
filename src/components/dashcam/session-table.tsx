@@ -175,6 +175,7 @@ export function RequestTable({
                 <Tag tone="info">{row.stream ? "流式" : "非流式"}</Tag>
                 {row.requestTruncated ? <Tag tone="warning">请求截断</Tag> : null}
                 {row.responseTruncated ? <Tag tone="warning">响应截断</Tag> : null}
+                {row.clientAborted ? <Tag tone="warning">客户端中断</Tag> : null}
                 {row.gzip.request || row.gzip.response ? <Tag>gz</Tag> : null}
               </div>
             </TableCell>
