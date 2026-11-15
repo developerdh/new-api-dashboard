@@ -19,6 +19,7 @@ loadE2eEnv();
 const here = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3088";
 const USER_ID = process.env.E2E_USER_ID ?? "1";
+const MODEL = process.env.E2E_MODEL ?? "GLM-5.3-Flash";
 
 // 代理默认取看板主机名 + 3090（同机部署的默认形态）；跨机部署用 E2E_SEED_HOST 显式指定
 const PROXY_BASE =
@@ -67,7 +68,7 @@ async function send(label, traceId, body) {
 }
 
 await send("非流式详情", `e2esmoke-${runId}-a`, {
-  model: "gpt-4o-mini",
+  model: MODEL,
   stream: false,
   messages: [{ role: "user", content: marker }],
 });
@@ -76,7 +77,7 @@ for (const [label, suffix] of [
   ["线程第 2 轮", "b2"],
 ]) {
   await send(label, `e2esmoke-${runId}-${suffix}`, {
-    model: "gpt-4o-mini",
+    model: MODEL,
     stream: true,
     prompt_cache_key: threadKey,
     messages: [{ role: "user", content: `${marker} thread` }],

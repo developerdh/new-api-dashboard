@@ -22,6 +22,7 @@ cp tests/e2e/.env.e2e.example .env.e2e   # 填写目标环境与凭据（.env.e2
 | `E2E_USERNAME` / `E2E_PASSWORD` | `admin` / 无默认 | 看板登录凭据（部署时 `DASHBOARD_AUTH_USER/PASS`） |
 | `E2E_TOKEN` | 无（必填） | 造数用完整 Authorization 头（如 `Bearer sk-…`），须属于 `E2E_USER_ID` 名下的 token |
 | `E2E_USER_ID` | `1` | 造数记录归属的用户 |
+| `E2E_MODEL` | `GLM-5.3-Flash` | 造数请求的模型名（须为 token 分组下可用模型） |
 | `E2E_SEED_HOST` | 看板主机名 + `:3090` | 采集代理地址；跨机时显式指定或用 SSH 隧道 |
 | `E2E_SAMPLING_ENABLED` | `0` | 目标环境开了抽样时置 `1`（断言提示条出现） |
 
