@@ -14,6 +14,7 @@ New API 自身不保存请求的提示词与模型返回，看板无法做内容
 | [04-decisions.md](04-decisions.md) | 关键取舍与否决方案的理由（D1–D11） |
 | [05-dashboard-plan.md](05-dashboard-plan.md) | 会话看板实施记录：偏差登记（D1–D6）、聚合与增量算法、翻页、token 链路、界面形态 |
 | [06-performance-plan.md](06-performance-plan.md) | 采集性能与容量评估、风险证伪、改造专项决策（D-P1～D-P5）与实施设计（已裁决待实施） |
+| [07-loadtest-capacity.md](07-loadtest-capacity.md) | 吞吐画像与承载上限压测报告（LOADTEST-2026-11-15-002）：阶梯实测、上限判定、差异清单（D1–D5）、复验规则与复现步骤 |
 
 组件自身的构建与运行说明同时保留在 [`dashcam/README.md`](../../dashcam/README.md)，面向运维；本目录面向设计与长期维护。
 

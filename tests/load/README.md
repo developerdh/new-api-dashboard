@@ -1,6 +1,6 @@
 # 压测工具与运行手册（tests/load）
 
-采集代理（new-api-dashcam）的性能容量压测工具集。本文写：工具用途、指标口径、执行步骤、残留清理与已知限制；不写：采集代理的设计与实现（见 [docs/dashcam/](../../docs/dashcam/)），压测结论随压测报告留存。
+采集代理（new-api-dashcam）的性能容量压测工具集。本文写：工具用途、指标口径、执行步骤、残留清理与已知限制；不写：采集代理的设计与实现（见 [docs/dashcam/](../../docs/dashcam/)）。压测结论见 [07-loadtest-capacity.md](../../docs/dashcam/07-loadtest-capacity.md)。
 
 关联文档：性能方案与推导值见 [06-performance-plan.md](../../docs/dashcam/06-performance-plan.md)；压测执行纪律见 [docs/dev-rules.md](../../docs/dev-rules.md)。
 
