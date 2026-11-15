@@ -99,7 +99,8 @@ export function SessionsClient({ userId }: { userId: string }) {
   if (view.stream !== "all") params.set("stream", view.stream === "stream" ? "true" : "false");
   if (view.failedOnly) params.set("failed", "true");
 
-  const api = useApi<DashcamSessionList>(`/api/dashcam/sessions?${params.toString()}`);
+  const requestUrl = `/api/dashcam/sessions?${params.toString()}`;
+  const api = useApi<DashcamSessionList>(requestUrl);
 
   // 响应合并：page=1 替换、page>1 追加。分组与否、页码、每页条数都在响应里，
   // 合并逻辑只依赖 api.data，避免与视图状态产生时序耦合。
@@ -124,7 +125,11 @@ export function SessionsClient({ userId }: { userId: string }) {
   }, [api.data]);
 
   const data = api.data;
-  const matched = data !== undefined && data.grouped === (view.group === "session");
+  // 切换口径（日期/粒度/形态/每页条数）的过渡期：响应未到时 rows 已被 reset 清空，
+  // 若沿用旧 data 会直接命中「无采集记录」空态——其实是还没加载完。
+  // page=1 的切换统一落加载骨架；page>1 是「加载更多」追加语义，保留旧行 + 页脚 spinner。
+  const switching = api.loading && page === 1 && api.dataUrl !== requestUrl;
+  const matched = !switching && data !== undefined && data.grouped === (view.group === "session");
   const total = matched ? data.total : null;
   const partial = matched && data.partial === true;
   const grouped = view.group === "session";
@@ -199,7 +204,7 @@ export function SessionsClient({ userId }: { userId: string }) {
               </div>
             </div>
           ) : !matched ? (
-            <div className="h-full w-full rounded-lg skeleton-shimmer" aria-busy="true" />
+            <div className="h-full w-full rounded-lg skeleton-shimmer" aria-busy="true" data-testid="sessions-loading" />
           ) : data.available === false ? (
             <div className="flex min-h-0 flex-1 items-center justify-center">
               <Notice>

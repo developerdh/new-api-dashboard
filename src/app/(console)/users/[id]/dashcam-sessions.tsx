@@ -86,10 +86,15 @@ export function DashcamSessions({
   if (view.stream !== "all") params.set("stream", view.stream === "stream" ? "true" : "false");
   if (view.failedOnly) params.set("failed", "true");
 
-  const api = useApi<DashcamSessionList>(`/api/dashcam/sessions?${params.toString()}`);
+  const requestUrl = `/api/dashcam/sessions?${params.toString()}`;
+  const api = useApi<DashcamSessionList>(requestUrl);
   const data = api.data;
+  // 切换查询口径（日期/粒度/形态/翻页）的过渡期：useApi 会保留上一口径的旧响应，
+  // 此时把口径视为未匹配，让内容区立即落到加载骨架——否则旧表格一直挂着，
+  // 看起来像「点了没反应」，直到响应到达才突然跳变（切到空日期时尤其明显）。
+  const switching = api.loading && api.dataUrl !== requestUrl;
   // 视图切换的瞬间可能取到上一模式的响应：口径不一致时先按加载态处理
-  const matched = data !== undefined && data.grouped === (view.group === "session");
+  const matched = !switching && data !== undefined && data.grouped === (view.group === "session");
   const sessions = matched ? data.sessions : [];
   const conversations = matched ? (data.conversations ?? []) : [];
   const rows = view.group === "session" ? conversations.length : sessions.length;
@@ -154,7 +159,7 @@ export function DashcamSessions({
             </Button>
           </div>
         ) : !matched ? (
-          <div className="h-40 w-full rounded-lg skeleton-shimmer" aria-busy="true" />
+          <div className="h-40 w-full rounded-lg skeleton-shimmer" aria-busy="true" data-testid="sessions-loading" />
         ) : data.available === false ? (
           <Notice>
             会话监控未启用（未配置 <span className="font-mono">DASHCAM_DIR</span>
