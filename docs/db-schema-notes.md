@@ -70,6 +70,8 @@ completion_tokens   int8    NULL
 
 其余列：`use_time`、`is_stream`、`channel_id`、`channel_name`、`token_id`、`group`、`ip`、`request_id`、`upstream_request_id`、`other`、`content`、`token_name`。
 
+`other` 为 JSON 对象文本（缓存 token 明细在其中），结构与跨语义口径见 §3.7。
+
 近 7 天分布：`type = 2` 66,971 行；`type = 5` 364 行、`7` 15 行、`3` 10 行、`1` 3 行，非消费行 `quota = 0`。
 
 ### 3.3 users
@@ -119,11 +121,38 @@ last_login_at  int8    NULL
 | 行数量级 | `quota_data` 8.4k、`logs` 545k、`users` 47 |
 | 只读权限 | `INSERT` / `UPDATE` / `DELETE` / `CREATE` 断言均为 `f` |
 
+### 3.7 `logs.other` 缓存字段与 usage 语义（2026-11-15 实测）
+
+`other` 为 JSON 对象文本。全表 `type = 2` 599,909 行（2026-07 ~ 2026-11）聚合侧 `jsonb` 转换零失败、全部行含缓存键。主要键：
+
+| 键 | 类型 | 语义 |
+|---|---|---|
+| `cache_tokens` | int | 缓存读取（命中）量 |
+| `cache_creation_tokens` | int | 缓存写入量（极少：>0 仅 21 行） |
+| `cache_ratio` / `cache_creation_ratio` | float | 缓存读/写计价比例（如 deepseek 0.02 / 1.25） |
+| `usage_semantic` | text | usage 语义标记；缺省 = openai 语义 |
+| 其余 | — | `frt`、`model_ratio`、`completion_ratio`、`group_ratio`、`request_path`、`stream_status`、`admin_info` 等计价与请求元数据 |
+
+**跨语义口径（关键）**——`prompt_tokens` 与缓存的关系按语义族不同，不能混算：
+
+| 语义族 | 判定 | 行数 | `prompt_tokens` 与缓存的关系 |
+|---|---|---|---|
+| openai（缺省） | 无 `usage_semantic` 键 | 542,983 | 已含 `cache_tokens`（子集，实测 0 行越界） |
+| anthropic | `usage_semantic = 'anthropic'`（`/v1/messages` + `claude: true`） | 56,942 | 不含缓存：55,704 行 `cache_tokens > prompt_tokens`（样本 prompt=696 / cache=672,896） |
+
+由此确定 Token 构成卡的聚合口径（缓存是输入的细分，不与输入并列）：
+
+- **有效输入** = `Σ prompt_tokens + Σ(anthropic 行 cache_tokens + cache_creation_tokens)`；
+- **缓存命中率** = `Σ cache_tokens / 有效输入`；
+- 输出与总量口径不变（D2 的 `max(token_used, prompt + completion)` 未动）。
+
+SQL 实现：`user.ts` 内 raw sql 片段 + `btrim(other) LIKE '{%'` 守卫——非对象脏值按 0 计，聚合不因 `jsonb` 转换失败而整体报错。
+
 ## 4. 与方案 §2.2 的差异清单
 
 | 编号 | 差异 | 实测 | 口径处理 |
 |---|---|---|---|
-| D2 | `quota_data` 缺 `prompt_tokens` / `completion_tokens` | 确认缺失 | Token 拆分取 `logs WHERE type = 2`；总量取 `max(token_used, prompt + completion)` 兼容 5 分钟延迟 |
+| D2 | `quota_data` 缺 `prompt_tokens` / `completion_tokens` | 确认缺失 | Token 拆分取 `logs WHERE type = 2`；总量取 `max(token_used, prompt + completion)` 兼容 5 分钟延迟；缓存拆分与跨语义有效输入口径见 §3.7 |
 | D4 | `logs` 含非消费记录 | 近 7 天非消费 392 行，`quota = 0` | 所有 `logs` 统计固定 `type = 2` |
 | D6 | `quota_data` 非严格小时唯一 | 7 天 704 桶 / 730 行 | 请求数不得由行数推导，统一取 `logs` |
 | D9 | `users.quota` 语义未定 | 全部 `status = 1` | 待产品确认；不影响聚合 |
@@ -136,6 +165,7 @@ last_login_at  int8    NULL
 ### 5.1 已落地
 
 - `QuotaDataTable` 12 列（含 `count`，不含 prompt/completion）；`LogsTable` 9 列（含 `type`）；`UsersTable` 7 列（含 `display_name` / `used_quota` / `request_count`）。
+- `LogsTable` 不含 `other` 列：缓存聚合走 `user.ts` 的 raw sql 片段（守卫 + `jsonb`），见 §3.7。
 - 可空性按 `information_schema.is_nullable` 声明；`created_at` 统一 `number`（Unix 秒），int8 → number 由 `db.ts` 进程级解析器完成。
 - `src/server/__tests__/schema.test.ts` 锁定实测列集合与复验状态。
 

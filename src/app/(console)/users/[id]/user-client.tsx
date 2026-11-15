@@ -17,7 +17,7 @@ import { CalendarHeatmap } from "@/components/charts/calendar-heatmap";
 import { ChartExportButton } from "@/components/charts/chart-export-button";
 import { GranularitySwitch } from "@/components/charts/granularity-switch";
 import { ModelPie } from "@/components/charts/model-pie";
-import { TokenSplitBar } from "@/components/charts/token-split-bar";
+import { TokenBreakdownList } from "@/components/charts/token-breakdown-list";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
 import { Button } from "@/components/ui/button";
@@ -252,18 +252,21 @@ export function UserClient({ userId }: { userId: string }) {
 
         <Card className="gap-3 py-5">
           <div className="flex items-center justify-between px-5">
-            <h2 className="text-sm font-semibold">Token 输入/输出占比</h2>
+            <h2 className="text-sm font-semibold">Token 构成</h2>
           </div>
           <div className="px-5 py-2">
             <SectionBody
               loading={overviewApi.loading}
               error={overviewApi.error}
               onRetry={overviewApi.refresh}
-              skeletonHeight={140}
+              skeletonHeight={170}
             >
-              <TokenSplitBar
+              <TokenBreakdownList
                 promptTokens={overview?.promptTokens ?? 0}
                 completionTokens={overview?.completionTokens ?? 0}
+                cacheReadTokens={overview?.cacheReadTokens ?? 0}
+                cacheWriteTokens={overview?.cacheWriteTokens ?? 0}
+                cacheOutsidePromptTokens={overview?.cacheOutsidePromptTokens ?? 0}
               />
             </SectionBody>
           </div>

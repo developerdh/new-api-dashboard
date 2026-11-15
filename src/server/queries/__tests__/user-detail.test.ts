@@ -54,6 +54,9 @@ const OVERVIEW: UserOverviewSnapshot = {
   totalTokens: 5_678,
   promptTokens: 4_000,
   completionTokens: 1_678,
+  cacheReadTokens: 2_500,
+  cacheWriteTokens: 120,
+  cacheOutsidePromptTokens: 620,
   requestCount: 9,
   activeDays: 3,
 };
@@ -105,10 +108,19 @@ describe("单用户 SQL 编译口径", () => {
     expect(compiled.parameters).toEqual([USER_ID, T0, T1]);
   });
 
-  it("overview 请求数：logs 消费流水（type=2）COUNT(*) + Token 拆分，限定用户 + 区间", () => {
+  it("overview 请求数：logs 消费流水（type=2）COUNT(*) + Token 拆分 + 缓存聚合，限定用户 + 区间", () => {
     const compiled = buildUserRequestCountQuery(db, USER_ID, { start: T0, end: T1 }).compile();
     expect(compiled.sql).toContain('from "logs"');
     expect(compiled.sql).toContain('COUNT(*)::bigint as "request_count"');
+    expect(compiled.sql).toContain('as "cache_read_tokens"');
+    expect(compiled.sql).toContain('as "cache_write_tokens"');
+    expect(compiled.sql).toContain('as "cache_outside_prompt_tokens"');
+    // 缓存口径：jsonb 兜底守卫（防非 JSON 脏值）+ anthropic 语义修正（db-schema-notes §3.7）
+    expect(compiled.sql).toContain("btrim(other) LIKE '{%'");
+    expect(compiled.sql).toContain("->> 'cache_tokens'");
+    expect(compiled.sql).toContain("->> 'cache_creation_tokens'");
+    expect(compiled.sql).toContain("= 'anthropic'");
+    // 静态 SQL 片段不产生额外参数
     expect(compiled.sql).toMatch(/"type" = \$1/);
     expect(compiled.parameters).toEqual([2, USER_ID, T0, T1]);
   });
@@ -148,6 +160,9 @@ describe("映射与占比", () => {
       totalTokens: 0,
       promptTokens: 0,
       completionTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cacheOutsidePromptTokens: 0,
       requestCount: 0,
       activeDays: 0,
     });
@@ -161,7 +176,14 @@ describe("映射与占比", () => {
           total_tokens: 5_678,
           active_days: 3,
         },
-        { request_count: 9, prompt_tokens: 4_000, completion_tokens: 1_678 },
+        {
+          request_count: 9,
+          prompt_tokens: 4_000,
+          completion_tokens: 1_678,
+          cache_read_tokens: 2_500,
+          cache_write_tokens: 120,
+          cache_outside_prompt_tokens: 620,
+        },
       ),
     ).toEqual(OVERVIEW);
   });
