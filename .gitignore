@@ -60,3 +60,9 @@ tests/e2e/playwright-report/
 
 # GUI 测试证据（本地留存，不入库）
 gui-test-screenshots/
+
+# 压测结果（本地留存，不入库）
+tests/load/results/
+
+# 压测哑上游构建产物（本地构建，不入库）
+tests/load/dummy-upstream-linux
