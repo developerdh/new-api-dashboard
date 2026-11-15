@@ -199,12 +199,14 @@
 | D3 | SSH 隧道 network_error 噪声 | 率随 QPS 上升：小 body 0.18%→0.45%，大 body 0.05%→0.37%；achieved 损失与误差率一一对应 | 环境噪声，非代理转发损失；achieved 判读按此口径修正 |
 | D4 | 容器内负载生成器高 QPS 伪影（工具限制） | 三次失败：默认 4GB 堆 OOM；10GB 堆 pacing 崩塌至 30/s 且全部请求悬挂 80–140s（代理零到达）；短冲恢复但 TTFT 均一 6–21s ≈ 负载时长（计数冻结、结束后一次性补账 captured+6562 / dropped+7810 / skipped+594）。根因：每请求分配 ≈273KB，V8 GC 饿死事件循环（垃圾回收一度占 CPU 87%）→ 请求体写出延迟 → 代理 handler 全部阻塞在 D1 的 body Read 上 | 正式 400 档改双实例方案（容器实例加大堆与大年轻代），获得干净数据；TTFT 判读以隧道实例为准；失败尝试原始 JSON 已随数据留存 |
 | D5 | 采样 CPU 非单调、fd 尖峰 | 400 档 fd 峰值 496；CPU 129.8@200 → 109.2@400 | 与在途连接数/轮转相位相关，量级正常 |
+| D6 | 客户端在流结束前主动断开 → 成功请求的采集记录整条丢失（被测缺陷，2026-11-15 会话测试发现） | 复现实验（curl --max-time 3 中途断开流式对话）：captured +1、buffered_bytes +24,896 冻结、索引不增、无任何日志、无遗留 goroutine。真实场景：deepseek-harness 9 条成功对话全部丢失、7 条失败请求全部正常（错误响应体小、拷贝即时完成）。机理：客户端断开导致响应拷贝出错 → ReverseProxy 按设计 `panic(http.ErrAbortHandler)` → net/http 对该 panic 值静默恢复 → `rec.finish()`（ServeHTTP 返回后的普通调用，非 defer）被跳过 → 记录既不入队也不释放计数 → GC 回收。压测未触发的原因：loadgen 读完整个流到 EOF 才断开，不落入拷贝中途 | 影响采集完整性，业务转发与计费零影响；buffered_bytes 因此不可作告警指标（D1 同族）。修复建议：把 `rec.finish()` 从 ServeHTTP 之后的普通调用改为 defer + recover（对 ErrAbortHandler 恢复后补记 finish，其余 panic 重新上抛），并给 finish 加幂等保护；断开时落盘的应为部分响应记录。修复后按 §8 复验：用 `curl --max-time 3` 中途断开验证记录落盘、buffered_bytes 归零 |
 
 ## 8. 复验规则
 
-1. 被测代理修复请求体读超时（D1）后：复跑大 body 阶梯 200/400 档，复核 buffered_bytes 归零行为与泄漏清零。
+1. 被测代理修复请求体读超时（D1）或客户端断开时的 finish 补记（D6）后：复跑大 body 阶梯 200/400 档，复核 buffered_bytes 归零行为与泄漏清零。
 2. 部署形态或硬件变更（网关与代理分机、磁盘类型变更）后：重跑全部阶梯。
 3. 采集配置调整（DASHCAM_FLUSH_WORKERS / DASHCAM_QUEUE_CAP / DASHCAM_MEM_BUDGET）后：重跑大 body 阶梯，更新采集降级起点。
+4. D6 修复后：`curl --max-time 3` 中途断开流式对话，验证记录落盘（部分响应 + tr 截断标记）且 buffered_bytes 归零。
 
 ## 9. 限制
 
