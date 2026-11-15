@@ -302,6 +302,7 @@ function TurnCard({
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
           {turn.model === "" ? "—" : turn.model}
           {turn.requestTruncated || turn.responseTruncated ? " · 截断" : ""}
+          {turn.clientAborted ? " · 客户端中断" : ""}
         </span>
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {turn.durationMs} ms

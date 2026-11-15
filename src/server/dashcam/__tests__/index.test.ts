@@ -162,6 +162,65 @@ describe("scanSessions", () => {
   });
 });
 
+describe("tr 位 bit4 解码（客户端中断，D6）", () => {
+  it("scanSessions：4 置 clientAborted，1/2 截断位不受影响，混合位并存", async () => {
+    await writeFile(
+      join(dir, "index", "2026-11-13.ndjson"),
+      [
+        entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { tr: 4 }),
+        entry(T2, FP_A, "2026-11-13T10:00:00+08:00", { tr: 3 }),
+        entry(T3, FP_A, "2026-11-13T11:00:00+08:00", { tr: 6 }),
+      ].join("\n"),
+      "utf8",
+    );
+    // 索引文件以换行收尾：末行缺 `\n` 会被当作正在追加的半行丢弃（parseIndexText 语义）
+    const text = [
+      entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { tr: 4 }),
+      entry(T2, FP_A, "2026-11-13T10:00:00+08:00", { tr: 3 }),
+      entry(T3, FP_A, "2026-11-13T11:00:00+08:00", { tr: 6 }),
+    ].join("\n") + "\n";
+    await writeFile(join(dir, "index", "2026-11-13.ndjson"), text, "utf8");
+    const result = await scan();
+    const byTrace = new Map(result.rows.map((row) => [row.traceId, row]));
+    expect(byTrace.get(T1)).toMatchObject({
+      clientAborted: true,
+      requestTruncated: false,
+      responseTruncated: false,
+    });
+    expect(byTrace.get(T2)).toMatchObject({
+      clientAborted: false,
+      requestTruncated: true,
+      responseTruncated: true,
+    });
+    expect(byTrace.get(T3)).toMatchObject({
+      clientAborted: true,
+      requestTruncated: false,
+      responseTruncated: true,
+    });
+  });
+
+  it("scanThread：线程轮次同样解码 bit4", async () => {
+    await writeFile(
+      join(dir, "index", "2026-11-13.ndjson"),
+      [entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { k: S1, tr: 4 })].join("\n") + "\n",
+      "utf8",
+    );
+    const thread = await scanThread({
+      dir,
+      sessionKey: S1,
+      fingerprints: new Set([FP_A]),
+      start: START,
+      end: END,
+      maxDays: 31,
+    });
+    expect(thread.turns[0]).toMatchObject({
+      clientAborted: true,
+      requestTruncated: false,
+      responseTruncated: false,
+    });
+  });
+});
+
 describe("会话聚合", () => {
   it("同指纹同会话键合并，缺键的请求独立成行", () => {
     const rows: DashcamSessionRow[] = [
@@ -179,6 +238,7 @@ describe("会话聚合", () => {
       responseBytes: 20,
       requestTruncated: false,
       responseTruncated: false,
+      clientAborted: false,
       gzip: { request: false, response: false },
       startedAt: "",
       ...item,
