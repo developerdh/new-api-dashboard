@@ -213,6 +213,16 @@ export interface UserOverviewSnapshot {
   totalTokens: number;
   promptTokens: number;
   completionTokens: number;
+  /** 缓存读取（命中）token：`logs.other.cache_tokens` 合计（两种 usage 语义统一为「读取」）。 */
+  cacheReadTokens: number;
+  /** 缓存写入 token：`logs.other.cache_creation_tokens` 合计（仅 anthropic 语义行存在）。 */
+  cacheWriteTokens: number;
+  /**
+   * prompt_tokens 未覆盖的缓存量：anthropic 语义行的缓存读写合计。
+   * openai 语义 prompt 已含缓存、anthropic 语义不含（实测 db-schema-notes §3.7），
+   * 有效输入 = promptTokens + cacheOutsidePromptTokens。
+   */
+  cacheOutsidePromptTokens: number;
   requestCount: number;
   /** 区间内活跃天数（东八区自然日去重）。 */
   activeDays: number;
@@ -235,7 +245,27 @@ export interface UserRequestCountRow {
   request_count: number;
   prompt_tokens: number;
   completion_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cache_outside_prompt_tokens: number;
 }
+
+/**
+ * logs.other 缓存字段 SQL 片段（跨语义口径实测见 db-schema-notes §3.7）。
+ *
+ * - other 为 JSON 对象文本；`LIKE '{%'` 兜底防未来脏值：非对象行按 0 计，聚合不会因
+ *   jsonb 转换失败而整体报错（当前全表 type=2 行实测 100% 合法 JSON）。
+ * - 语义分族以 `usage_semantic` 为准：`anthropic`（/v1/messages）的 prompt_tokens
+ *   不含缓存；缺省（openai 语义）prompt_tokens 已含 cache_tokens——两族不能混算。
+ */
+const LOGS_OTHER_JSONB = sql`(CASE WHEN other IS NOT NULL AND btrim(other) LIKE '{%' THEN other::jsonb ELSE NULL END)`;
+/** 缓存读取（命中）量。 */
+const LOGS_CACHE_READ = sql<number>`COALESCE((${LOGS_OTHER_JSONB} ->> 'cache_tokens')::bigint, 0)`;
+/** 缓存写入量（仅 anthropic 语义行存在该键）。 */
+const LOGS_CACHE_WRITE = sql<number>`COALESCE((${LOGS_OTHER_JSONB} ->> 'cache_creation_tokens')::bigint, 0)`;
+/** anthropic 语义判定：该族 prompt_tokens 不含缓存，有效输入需补回读写量。 */
+const LOGS_IS_ANTHROPIC_SEMANTIC =
+  sql<boolean>`COALESCE(${LOGS_OTHER_JSONB} ->> 'usage_semantic', '') = 'anthropic'`;
 
 /**
  * 单用户区间聚合（§5.5 的聚合部分 + 活跃天数）。
@@ -260,7 +290,7 @@ export function buildUserOverviewQuery(
     .where("created_at", "<", range.end);
 }
 
-/** 单用户请求数 + Token 拆分（logs 消费流水）。 */
+/** 单用户请求数 + Token 拆分 + 缓存聚合（logs 消费流水；缓存跨语义口径见 db-schema-notes §3.7）。 */
 export function buildUserRequestCountQuery(
   db: ReadOnlyDatabase,
   userId: number,
@@ -273,6 +303,11 @@ export function buildUserRequestCountQuery(
       sql<number>`COUNT(*)::bigint`.as("request_count"),
       sql<number>`COALESCE(SUM(prompt_tokens), 0)::bigint`.as("prompt_tokens"),
       sql<number>`COALESCE(SUM(completion_tokens), 0)::bigint`.as("completion_tokens"),
+      sql<number>`COALESCE(SUM(${LOGS_CACHE_READ}), 0)::bigint`.as("cache_read_tokens"),
+      sql<number>`COALESCE(SUM(${LOGS_CACHE_WRITE}), 0)::bigint`.as("cache_write_tokens"),
+      sql<number>`COALESCE(SUM(CASE WHEN ${LOGS_IS_ANTHROPIC_SEMANTIC} THEN ${LOGS_CACHE_READ} + ${LOGS_CACHE_WRITE} ELSE 0 END), 0)::bigint`.as(
+        "cache_outside_prompt_tokens",
+      ),
     ])
     .where("type", "=", LOG_TYPE_CONSUME)
     .where("user_id", "=", userId)
@@ -293,6 +328,9 @@ export function toUserOverviewSnapshot(
     ),
     promptTokens: toInteger(logRow?.prompt_tokens),
     completionTokens: toInteger(logRow?.completion_tokens),
+    cacheReadTokens: toInteger(logRow?.cache_read_tokens),
+    cacheWriteTokens: toInteger(logRow?.cache_write_tokens),
+    cacheOutsidePromptTokens: toInteger(logRow?.cache_outside_prompt_tokens),
     requestCount: toInteger(logRow?.request_count),
     activeDays: toInteger(row?.active_days),
   };
