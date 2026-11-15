@@ -138,6 +138,9 @@ func TestClientAbortMidStreamStillCaptured(t *testing.T) {
 	if !entry.ST {
 		t.Fatalf("流式标记应被提取: %+v", entry)
 	}
+	if entry.TR != truncClientAbort {
+		t.Fatalf("客户端中断应置 tr bit4（部分响应，非尺寸截断）: tr=%d", entry.TR)
+	}
 	if got := flushed.Load(); got != 1 {
 		t.Fatalf("flush worker 应收到恰好 1 条，得到 %d", got)
 	}
@@ -193,6 +196,9 @@ func TestCompleteStreamUnaffected(t *testing.T) {
 	if entry.S != http.StatusOK || !entry.ST {
 		t.Fatalf("完整请求索引不符: %+v", entry)
 	}
+	if entry.TR != 0 {
+		t.Fatalf("完整请求不应带任何 tr 位: tr=%d", entry.TR)
+	}
 	// 客户端读到的字节数与落盘响应字节数一致 = 全量采集，无重复
 	if int64(len(body)) != entry.RS {
 		t.Fatalf("响应应全量落盘: 客户端读到 %d，索引 RS=%d", len(body), entry.RS)
@@ -241,5 +247,8 @@ func TestNonAbortPanicRepanicsAfterFinish(t *testing.T) {
 	if caught != "boom" {
 		t.Fatalf("上抛的 panic 值应原样保留，得到 %v", caught)
 	}
-	waitIndexLines(t, s.cfg.DashcamDir, 1) // finish 在 panic 展开中已补记
+	entry := parseIndexEntry(t, waitIndexLines(t, s.cfg.DashcamDir, 1)[0]) // finish 在 panic 展开中已补记
+	if entry.TR != 0 {
+		t.Fatalf("非 ErrAbortHandler 的 panic 不应置 tr bit4: tr=%d", entry.TR)
+	}
 }

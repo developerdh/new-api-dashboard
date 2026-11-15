@@ -149,6 +149,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		p := recover()
 		if rec != nil {
+			// ErrAbortHandler = ReverseProxy 拷贝响应到客户端失败（客户端中途断开）：
+			// 置 tr bit4 把"部分响应"与尺寸截断区分开，其余 panic 不带此位。
+			if p == http.ErrAbortHandler {
+				rec.aborted = true
+			}
 			rec.finish(box.msg)
 		}
 		if p != nil {
