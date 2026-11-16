@@ -57,9 +57,13 @@ type indexEntry struct {
 const (
 	truncRequest  = 1 << 0
 	truncResponse = 1 << 1
-	// truncClientAbort（D6）：客户端在响应流拷贝中途断开，记录为部分响应。
+	// truncClientAbort（D6）：客户端在响应流拷贝中途断开且响应不完整，记录为部分响应。
 	// 与尺寸截断（1/2）区分："流提前结束"不丢已收数据，"尺寸截断"是缓冲被裁剪。
 	truncClientAbort = 1 << 2
+	// truncClientEOS：客户端断开时响应缓冲已含应用层流结束标记（如 [DONE]）——
+	// 典型如客户端读完整个回复立即关连接（harness 模式），代理收尾帧写失败但记录完整。
+	// 与 bit4 互斥：有结束标记 = 收尾断开（数据完整），无 = 真中断（数据缺失）。
+	truncClientEOS = 1 << 3
 )
 
 var (
@@ -339,6 +343,28 @@ func (r *record) release() {
 
 func (r *record) setStatus(code int) { r.status = code }
 
+// responseStreamComplete 判定响应缓冲是否已含应用层流结束标记（truncClientEOS 依据）。
+// 三种流协议的终止事件：chat/completions 与 completions 以 "data: [DONE]" 收尾，
+// messages 以 message_stop 事件收尾，responses 以 response.completed 事件收尾。
+// 只在尾部 1KB 窗口扫描：终止标记必然临近流末尾，也避免大缓冲的全量扫描。
+// 非流式响应不适用（无终止标记），此类断开维持 truncClientAbort 口径。
+func (r *record) responseStreamComplete() bool {
+	tail := r.resBuf
+	if len(tail) > 1024 {
+		tail = tail[len(tail)-1024:]
+	}
+	for _, marker := range [][]byte{
+		[]byte("data: [DONE]"),
+		[]byte("event: message_stop"),
+		[]byte("response.completed"),
+	} {
+		if bytes.Contains(tail, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // finish 非阻塞入队后立即返回：转发路径到此为止，磁盘交给 worker。
 // 队满（三层降级第 3 层）丢弃整条记录——无索引行、无 blob，dropped 累计。
 // 幂等（D6）：重复调用直接返回，防止双入队/索引重复行。
@@ -349,7 +375,11 @@ func (r *record) finish(errMsg string) {
 	r.finished = true
 	r.errMsg = errMsg
 	if r.aborted {
-		r.trunc |= truncClientAbort
+		if r.responseStreamComplete() {
+			r.trunc |= truncClientEOS
+		} else {
+			r.trunc |= truncClientAbort
+		}
 	}
 	r.ms = time.Since(r.start).Milliseconds()
 	// 停机窗口（closed 已置位）：不再入队，按队满丢弃语义处理——

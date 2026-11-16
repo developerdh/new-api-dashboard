@@ -211,6 +211,52 @@ func TestCompleteStreamUnaffected(t *testing.T) {
 	}
 }
 
+func TestClientAbortClassification(t *testing.T) {
+	// D6 断开分类：aborted 记录按响应缓冲是否含应用层流结束标记分位——
+	// 含 [DONE]/message_stop/response.completed = 收尾断开（bit8，记录完整）；
+	// 不含 = 真中断（bit4，响应缺失）；两者互斥，完整非中断请求不带位。
+	s := newTestSink(t, nil)
+
+	eos := s.begin(testCaptureRequest(t, ""), testFP)
+	eos.writeResponse([]byte(`data: {"choices":[{"delta":{"content":"完整回复"}}]}` + "\n\n"))
+	eos.writeResponse([]byte("data: {\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n"))
+	eos.aborted = true
+	eos.finish("")
+
+	mid := s.begin(testCaptureRequest(t, ""), testFP)
+	mid.writeResponse([]byte(`data: {"choices":[{"delta":{"content":"半截"}}]}` + "\n\n"))
+	mid.aborted = true
+	mid.finish("")
+
+	clean := s.begin(testCaptureRequest(t, ""), testFP)
+	clean.writeResponse([]byte("data: ok\n\ndata: [DONE]\n\n"))
+	clean.finish("") // aborted=false：正常完成，不带任何客户端断开位
+
+	nonStream := s.begin(testCaptureRequest(t, ""), testFP)
+	nonStream.writeResponse([]byte(`{"choices":[{"message":{"content":"完整 JSON"}}]}`))
+	nonStream.aborted = true // 非流式无终止标记：维持真中断口径
+	nonStream.finish("")
+
+	lines := waitStableIndexLines(t, s.cfg.DashcamDir, 4, 200*time.Millisecond)
+	trs := map[string]int{}
+	for _, line := range lines {
+		e := parseIndexEntry(t, line)
+		trs[e.T] = e.TR
+	}
+	if got := trs[eos.trace]; got != truncClientEOS {
+		t.Fatalf("含 [DONE] 的断开应为收尾断开 bit8: tr=%d", got)
+	}
+	if got := trs[mid.trace]; got != truncClientAbort {
+		t.Fatalf("无终止标记的断开应为真中断 bit4: tr=%d", got)
+	}
+	if got := trs[clean.trace]; got != 0 {
+		t.Fatalf("正常完成不应带断开位: tr=%d", got)
+	}
+	if got := trs[nonStream.trace]; got != truncClientAbort {
+		t.Fatalf("非流式断开应维持真中断口径: tr=%d", got)
+	}
+}
+
 func TestFinishIdempotent(t *testing.T) {
 	// 幂等保护（D6）：重复 finish 不得双入队/产生索引重复行。
 	s := newTestSink(t, nil)
