@@ -22,6 +22,7 @@ const FP_B = "aaaaaaaaaaaa";
 const T1 = "0123456789abcdef0123456789abcdef";
 const T2 = "fedcba9876543210fedcba9876543210";
 const T3 = "11111111111111111111111111111111";
+const T4 = "22222222222222222222222222222222";
 /** 会话键哈希（16 位十六进制） */
 const S1 = "0123456789abcdef";
 const S2 = "fedcba9876543210";
@@ -162,47 +163,51 @@ describe("scanSessions", () => {
   });
 });
 
-describe("tr 位 bit4 解码（客户端中断，D6）", () => {
-  it("scanSessions：4 置 clientAborted，1/2 截断位不受影响，混合位并存", async () => {
-    await writeFile(
-      join(dir, "index", "2026-11-13.ndjson"),
-      [
-        entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { tr: 4 }),
-        entry(T2, FP_A, "2026-11-13T10:00:00+08:00", { tr: 3 }),
-        entry(T3, FP_A, "2026-11-13T11:00:00+08:00", { tr: 6 }),
-      ].join("\n"),
-      "utf8",
-    );
+describe("tr 位客户端断开位解码（D6）", () => {
+  it("scanSessions：bit4 中断 / bit8 收尾断开 / 1、2 截断位互不干扰", async () => {
     // 索引文件以换行收尾：末行缺 `\n` 会被当作正在追加的半行丢弃（parseIndexText 语义）
     const text = [
       entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { tr: 4 }),
       entry(T2, FP_A, "2026-11-13T10:00:00+08:00", { tr: 3 }),
       entry(T3, FP_A, "2026-11-13T11:00:00+08:00", { tr: 6 }),
+      entry(T4, FP_A, "2026-11-13T12:00:00+08:00", { tr: 8 }),
     ].join("\n") + "\n";
     await writeFile(join(dir, "index", "2026-11-13.ndjson"), text, "utf8");
     const result = await scan();
     const byTrace = new Map(result.rows.map((row) => [row.traceId, row]));
     expect(byTrace.get(T1)).toMatchObject({
       clientAborted: true,
+      clientEosClosed: false,
       requestTruncated: false,
       responseTruncated: false,
     });
     expect(byTrace.get(T2)).toMatchObject({
       clientAborted: false,
+      clientEosClosed: false,
       requestTruncated: true,
       responseTruncated: true,
     });
     expect(byTrace.get(T3)).toMatchObject({
       clientAborted: true,
+      clientEosClosed: false,
       requestTruncated: false,
       responseTruncated: true,
     });
+    expect(byTrace.get(T4)).toMatchObject({
+      clientAborted: false,
+      clientEosClosed: true,
+      requestTruncated: false,
+      responseTruncated: false,
+    });
   });
 
-  it("scanThread：线程轮次同样解码 bit4", async () => {
+  it("scanThread：线程轮次同样解码断开位", async () => {
     await writeFile(
       join(dir, "index", "2026-11-13.ndjson"),
-      [entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { k: S1, tr: 4 })].join("\n") + "\n",
+      [
+        entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { k: S1, tr: 4 }),
+        entry(T2, FP_A, "2026-11-13T10:00:00+08:00", { k: S1, tr: 8 }),
+      ].join("\n") + "\n",
       "utf8",
     );
     const thread = await scanThread({
@@ -215,8 +220,13 @@ describe("tr 位 bit4 解码（客户端中断，D6）", () => {
     });
     expect(thread.turns[0]).toMatchObject({
       clientAborted: true,
+      clientEosClosed: false,
       requestTruncated: false,
       responseTruncated: false,
+    });
+    expect(thread.turns[1]).toMatchObject({
+      clientAborted: false,
+      clientEosClosed: true,
     });
   });
 });
@@ -239,6 +249,7 @@ describe("会话聚合", () => {
       requestTruncated: false,
       responseTruncated: false,
       clientAborted: false,
+      clientEosClosed: false,
       gzip: { request: false, response: false },
       startedAt: "",
       ...item,

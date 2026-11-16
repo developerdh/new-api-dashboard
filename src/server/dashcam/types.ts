@@ -128,6 +128,8 @@ export interface DashcamSessionRow {
   responseTruncated: boolean;
   /** 客户端在响应流拷贝中途断开（索引 tr bit4，D6）：记录为部分响应，非尺寸截断 */
   clientAborted: boolean;
+  /** 客户端断开时响应已含流结束标记（索引 tr bit8）：收尾断开，记录完整 */
+  clientEosClosed: boolean;
   gzip: { request: boolean; response: boolean };
   /** 索引 `e` 字段（上游错误串），成功时缺省。 */
   error?: string;
@@ -186,6 +188,8 @@ export interface DashcamThreadTurn {
   responseTruncated: boolean;
   /** 客户端在响应流拷贝中途断开（索引 tr bit4，D6）：记录为部分响应，非尺寸截断 */
   clientAborted: boolean;
+  /** 客户端断开时响应已含流结束标记（索引 tr bit8）：收尾断开，记录完整 */
+  clientEosClosed: boolean;
   gzip: { request: boolean; response: boolean };
   /** 该轮的 token 用量（线程接口按预算水合最近若干轮，其余轮缺省） */
   usage?: DashcamUsage;

@@ -306,6 +306,7 @@ function TurnCard({
           {turn.model === "" ? "—" : turn.model}
           {turn.requestTruncated || turn.responseTruncated ? " · 截断" : ""}
           {turn.clientAborted ? " · 客户端中断" : ""}
+          {turn.clientEosClosed ? " · 客户端收尾断开" : ""}
         </span>
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {turn.durationMs} ms
