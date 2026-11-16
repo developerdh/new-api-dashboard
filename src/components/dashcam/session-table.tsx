@@ -8,7 +8,7 @@
  * - `request`：这一次调用的耗时/首字/大小 —— 排查单次异常。
  */
 import { StatusBadge, Tag } from "@/components/dashcam/badges";
-import { TokenPair, TokenPairHead } from "@/components/dashcam/token-pair";
+import { TokenPair, TokenPairHead, tokenDisplay } from "@/components/dashcam/token-pair";
 import {
   Table,
   TableBody,
@@ -193,7 +193,7 @@ export function RequestTable({
               title={
                 row.usage === undefined
                   ? `正文 ${formatBytes(row.requestBytes)} → ${formatBytes(row.responseBytes)}`
-                  : `正文 ${formatBytes(row.requestBytes)} → ${formatBytes(row.responseBytes)} · 输入 ${row.usage.promptTokens ?? 0} · 输出 ${row.usage.completionTokens ?? 0} token`
+                  : `正文 ${formatBytes(row.requestBytes)} → ${formatBytes(row.responseBytes)} · 输入 ${tokenDisplay(row.usage.promptTokens)} · 输出 ${tokenDisplay(row.usage.completionTokens)} token`
               }
             >
               {row.usage === undefined ? (

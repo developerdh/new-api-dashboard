@@ -14,6 +14,8 @@ function sanitizeNext(value: string | null): string {
     value === null ||
     !value.startsWith("/") ||
     value.startsWith("//") ||
+    // 浏览器把 http(s) URL 中的 "\" 等同 "/"，"/\evil.com" 会跳外站，必须整体拒绝
+    value.includes("\\") ||
     value.startsWith("/login") ||
     value.startsWith("/api/")
   ) {

@@ -1,6 +1,6 @@
 "use client";
 
-/** ECharts 实际渲染层（02/03）：仅在客户端加载，负责 resize、主题联动、事件与实例回传。）*/
+/** ECharts 实际渲染层（02/03）：仅在客户端加载，负责 resize、主题联动、事件与实例回传。 */
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 
@@ -53,9 +53,8 @@ export default function EChartInner({
 
     const themeObserver = new MutationObserver(() => {
       if (chart.isDisposed()) return;
-      chart.setOption(applyChartTheme(optionRef.current, readChartTheme()), {
-        notMerge: true,
-      });
+      // 主题补全用默认 merge：整体替换（notMerge）会丢图例勾选与 dataZoom 状态
+      chart.setOption(applyChartTheme(optionRef.current, readChartTheme()));
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,

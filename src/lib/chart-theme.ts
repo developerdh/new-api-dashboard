@@ -157,8 +157,10 @@ export function applyChartTheme(option: EChartsOption, theme: ChartTheme): EChar
       backgroundColor: theme.card,
       borderColor: theme.border,
       borderWidth: 1,
-      textStyle: { color: theme.foreground, ...tooltipTextStyle },
+      // 调用方的 tooltip 整体配置优先展开，但 textStyle 再合成一次——
+      // 否则调用方设置 textStyle（如 fontSize）会整体覆盖掉主题前景色
       ...tooltip,
+      textStyle: { color: theme.foreground, ...tooltipTextStyle },
     },
     ...(base.calendar === undefined ? {} : { calendar: themeCalendar(base.calendar, theme) }),
     xAxis: themeAxis(base.xAxis, theme, false),

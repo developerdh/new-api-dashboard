@@ -11,6 +11,7 @@ import type { EChartsOption } from "echarts";
 import { useMemo } from "react";
 
 import { EChart } from "@/components/charts/EChart";
+import { escapeHtml } from "@/lib/export-html";
 import { formatPercent, formatQuota } from "@/lib/format";
 import { primaryUserLabel } from "@/lib/user-label";
 import type { ModelCrossResult } from "@/server/queries/model";
@@ -75,8 +76,9 @@ export function buildCrossStackOption(result: ModelCrossResult): EChartsOption {
             user === undefined ? 0 : (userTotals.get(user.userId) ?? 0);
           if (value <= 0) continue;
           total += value;
+          // seriesName 来自库内 model_name（请求方可控），tooltip 按 HTML 渲染必须转义
           lines.push(
-            `${record.seriesName ?? ""}：${formatQuota(value)}（${formatPercent(
+            `${escapeHtml(record.seriesName ?? "")}：${formatQuota(value)}（${formatPercent(
               userTotal > 0 ? value / userTotal : 0,
             )}）`,
           );

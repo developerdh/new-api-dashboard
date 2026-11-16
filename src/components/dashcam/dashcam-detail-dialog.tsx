@@ -16,6 +16,7 @@ import { StatusBadge, Tag } from "@/components/dashcam/badges";
 import { BytePair } from "@/components/dashcam/byte-pair";
 import {
   blockMatches,
+  EMPTY_BLOCK_FILTER,
   isDefaultFilter,
   MessageFilterBar,
   type BlockFilter,
@@ -125,18 +126,48 @@ export function DashcamDetailDialog({
   // 全屏是视图偏好，切换请求时保持
   const [full, setFull] = useState(false);
   const [tab, setTab] = useState<Tab>("struct");
-  const [filter, setFilter] = useState<BlockFilter>({ role: "all", kind: "all", query: "" });
-  const [keywordInput, setKeywordInput] = useState("");
+  // 过滤/展开态按请求行键存（key 不匹配即视为默认）：切换记录时上一条的
+  // 搜索词、筛选与展开自动失效，不会串到新记录（对齐线程抽屉的会话键隔离模式）
+  const activeKey = row === null ? "" : `${row.date}:${row.traceId}`;
+  const [viewState, setViewState] = useState<{
+    key: string;
+    filter: BlockFilter;
+    keywordInput: string;
+    expandEarly: boolean;
+    showMeta: boolean;
+    openGroups: Set<string>;
+  }>({ key: "", filter: EMPTY_BLOCK_FILTER, keywordInput: "", expandEarly: false, showMeta: false, openGroups: new Set() });
+  const current =
+    viewState.key === activeKey
+      ? viewState
+      : { key: activeKey, filter: EMPTY_BLOCK_FILTER, keywordInput: "", expandEarly: false, showMeta: false, openGroups: new Set<string>() };
+  const filter = current.filter;
+  const keywordInput = current.keywordInput;
+  const expandEarly = current.expandEarly;
+  const showMeta = current.showMeta;
+  const openGroups = current.openGroups;
+  const mutateView = (
+    mutate: (
+      base: Pick<typeof current, "filter" | "keywordInput" | "expandEarly" | "showMeta" | "openGroups">,
+    ) => Partial<Pick<typeof current, "filter" | "keywordInput" | "expandEarly" | "showMeta" | "openGroups">>,
+  ): void =>
+    setViewState((s) => {
+      const base =
+        s.key === activeKey
+          ? s
+          : { key: activeKey, filter: EMPTY_BLOCK_FILTER, keywordInput: "", expandEarly: false, showMeta: false, openGroups: new Set<string>() };
+      return { ...base, ...mutate(base) };
+    });
   // 防抖：输入停顿 180ms 后再过滤，避免长会话逐键全量扫描
   useEffect(() => {
     const timer = setTimeout(() => {
-      setFilter((current) => ({ ...current, query: keywordInput.trim().toLowerCase() }));
+      mutateView((base) => ({
+        filter: { ...base.filter, query: base.keywordInput.trim().toLowerCase() },
+      }));
     }, 180);
     return () => clearTimeout(timer);
-  }, [keywordInput]);
-  const [expandEarly, setExpandEarly] = useState(false);
-  const [showMeta, setShowMeta] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutateView 随 activeKey 闭包更新，依赖其宿主 key 即可
+  }, [keywordInput, activeKey]);
 
   const url =
     row === null
@@ -185,9 +216,7 @@ export function DashcamDetailDialog({
   const activeTab = tabs.some((item) => item.key === tab) ? tab : "struct";
 
   const resetFilters = (): void => {
-    setFilter({ role: "all", kind: "all", query: "" });
-    setKeywordInput("");
-    setExpandEarly(false);
+    mutateView(() => ({ filter: EMPTY_BLOCK_FILTER, keywordInput: "", expandEarly: false }));
   };
   const highlight = keywordInput.trim();
 
@@ -298,7 +327,7 @@ export function DashcamDetailDialog({
               <button
                 type="button"
                 className="ml-auto text-primary hover:underline"
-                onClick={() => setShowMeta((value) => !value)}
+                onClick={() => mutateView((base) => ({ showMeta: !base.showMeta }))}
               >
                 {showMeta ? "收起" : "详细信息"}
               </button>
@@ -357,8 +386,10 @@ export function DashcamDetailDialog({
             <MessageFilterBar
               filter={filter}
               queryInput={keywordInput}
-              onFilterChange={(patch) => setFilter((current) => ({ ...current, ...patch }))}
-              onQueryInputChange={setKeywordInput}
+              onFilterChange={(patch) =>
+                mutateView((base) => ({ filter: { ...base.filter, ...patch } }))
+              }
+              onQueryInputChange={(value) => mutateView(() => ({ keywordInput: value }))}
               onReset={resetFilters}
             />
           </div>
@@ -413,7 +444,7 @@ export function DashcamDetailDialog({
                     {earlyCount > 0 && defaultFilter ? (
                       <button
                         type="button"
-                        onClick={() => setExpandEarly((value) => !value)}
+                        onClick={() => mutateView((base) => ({ expandEarly: !base.expandEarly }))}
                         className="mb-2 w-full rounded-lg border border-dashed px-3 py-2 text-left text-[11px] text-muted-foreground hover:bg-muted/40"
                       >
                         更早的上下文 {earlyCount} 项
@@ -526,11 +557,11 @@ export function DashcamDetailDialog({
                           type="button"
                           className="flex w-full items-center gap-3 px-3 py-2 text-left text-[11px]"
                           onClick={() => {
-                            setOpenGroups((current) => {
-                              const next = new Set(current);
+                            mutateView((base) => {
+                              const next = new Set(base.openGroups);
                               if (next.has(name)) next.delete(name);
                               else next.add(name);
-                              return next;
+                              return { openGroups: next };
                             });
                           }}
                         >

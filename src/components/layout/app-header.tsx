@@ -20,11 +20,15 @@ export function AppHeader({ title, onMenuClick }: AppHeaderProps) {
   const signOut = async (): Promise<void> => {
     setSigningOut(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
-    } finally {
+      const response = await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
+      if (!response.ok) throw new Error(`logout failed: ${response.status}`);
       // Cookie 已清除，替换到公开登录页并刷新路由树
       router.replace("/login");
       router.refresh();
+    } catch (error) {
+      // 登出失败：留在当前页可重试，避免被 /login 的守卫踢回造成循环
+      console.error("[app-header] sign out failed", error);
+      setSigningOut(false);
     }
   };
 

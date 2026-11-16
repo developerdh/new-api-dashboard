@@ -25,7 +25,7 @@ const NAV_GROUPS = [
 ] as const;
 
 /**
-）* 当前页的全局筛选区间（`start`/`end`/`granularity` → query 串。
+ * 当前页的全局筛选区间（`start`/`end`/`granularity` → query 串。
  * 侧栏导航据此透传区间：从总览进个人详情、从个人详情回总览都保持用户选定的区间，
  * 避免「点侧栏回到 /dashboard」把区间重置成默认近 30 天。
  */

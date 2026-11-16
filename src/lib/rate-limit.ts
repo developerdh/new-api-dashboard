@@ -19,7 +19,7 @@ export interface RateLimitResult {
   allowed: boolean;
   /** 本次放行后窗口内剩余次数（被拒时为 0）。 */
   remaining: number;
-  /** 窗口恢复时间（毫秒时间戳，被拒时用于 Retry-After）。 */
+  /** 窗口恢复点（与 `now` 同一时间线；被拒时用它减当前时刻得剩余等待）。 */
   resetAt: number;
 }
 
@@ -38,8 +38,12 @@ export class SlidingWindowRateLimiter {
     });
   }
 
-  /** 记录一次请求并判断是否放行（`now` 可注入，便于单测推进时钟）。 */
-  check(key: string, now: number = Date.now()): RateLimitResult {
+  /**
+   * 记录一次请求并判断是否放行（`now` 可注入，便于单测推进时钟）。
+   * 默认用 `performance.now()`（单调）：系统时钟回拨不会延长拒绝状态、
+   * 校时跳变期间 Retry-After 不漂移；消费方用 `resetAt - performance.now()` 换算剩余等待。
+   */
+  check(key: string, now: number = performance.now()): RateLimitResult {
     const windowStart = now - this.windowMs;
     const recent = (this.hits.get(key) ?? []).filter((timestamp) => timestamp > windowStart);
     const allowed = recent.length < this.limit;

@@ -9,6 +9,7 @@ import { useMemo } from "react";
 
 import { EChart } from "@/components/charts/EChart";
 import type { TrendMetric } from "@/components/charts/trend-line";
+import { escapeHtml } from "@/lib/export-html";
 import { formatCompactNumber, formatQuota } from "@/lib/format";
 import { fullUserLabel, primaryUserLabel } from "@/lib/user-label";
 import type { UserRankingRow } from "@/server/queries/user";
@@ -28,11 +29,12 @@ export function buildRankingOption(
       trigger: "axis",
       axisPointer: { type: "shadow" },
       // 坐标轴只放得下昵称，hover 时补上账号便于对账
+      // tooltip 以 HTML 渲染，昵称/账号为用户可控字符串，必须转义防注入
       formatter: (params: unknown): string => {
         const items = Array.isArray(params) ? params : [params];
         const first = items[0] as { dataIndex?: number; value?: unknown } | undefined;
         const row = rows[first?.dataIndex ?? -1];
-        const label = row === undefined ? "" : fullUserLabel(row);
+        const label = row === undefined ? "" : escapeHtml(fullUserLabel(row));
         return `${label}<br/>${formatValue(metric, Number(first?.value ?? 0))}`;
       },
     },
