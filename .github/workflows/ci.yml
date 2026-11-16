@@ -15,11 +15,13 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       # 版本由 package.json 的 packageManager 字段决定，此处不再重复指定
-      - uses: pnpm/action-setup@v4
+      # 第三方 action 固定到 commit SHA（v4）防 tag 可变导致的供应链篡改
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - uses: actions/setup-node@v4
         with:
