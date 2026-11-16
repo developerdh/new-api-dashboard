@@ -40,6 +40,10 @@ type indexEntry struct {
 	// K 会话键哈希（sha256(key) 前 16 位十六进制），缺失表示该协议/客户端未提供会话标识。
 	// 只存哈希：键可能含租户、项目等业务标识，且分组只需要可比较的稳定值。
 	K string `json:"k,omitempty"`
+	// H 客户端 harness 名（08-session-aggregation-design §7）：固定词表
+	// dsh / codex / claude-code / opencode，未识别客户端缺省。
+	// 只作识别标签，不参与聚合（k 口径不变）。
+	H string `json:"h,omitempty"`
 	// token 用量（pt=输入 / ct=输出 / cc=缓存命中输入 / cw=缓存写入），采集时从响应
 	// 正文 best-effort 提取（见 usage.go）；解析失败或旧版采集缺省，看板显示 —。
 	PT int64 `json:"pt,omitempty"`
@@ -213,6 +217,8 @@ type record struct {
 	peek       []byte
 	model      string
 	isStream   bool
+	headers    candidateHeaders // begin 拷贝的候选头快照（harness 识别与头键提取的输入）
+	harness    string           // flush 识别出的客户端名（索引 h），未识别缺省
 	sessionKey string
 	firstByte  time.Time
 	status     int
@@ -225,17 +231,20 @@ type record struct {
 	finished bool
 }
 
-// begin 只分配快照结构（纳秒级）：目录创建、文件命名与 trace 冲突处理全部搬到 flush。
-// 预算判定（三层降级第 1 层）在 handler 完成，这里不再检查。
+// begin 只分配快照结构并拷贝候选头（纯内存，纳秒级）：目录创建、文件命名与
+// trace 冲突处理全部搬到 flush。预算判定（三层降级第 1 层）在 handler 完成，
+// 这里不再检查；harness 识别与提取只发生在 flush worker（peek 可用、worker
+// 独占的既有纪律不变）。
 func (s *sink) begin(r *http.Request, token string) *record {
 	return &record{
-		sink:   s,
-		trace:  pickTrace(r),
-		token:  token,
-		path:   r.URL.Path,
-		start:  time.Now(),
-		ip:     clientIP(r),
-		status: http.StatusOK,
+		sink:    s,
+		trace:   pickTrace(r),
+		token:   token,
+		path:    r.URL.Path,
+		start:   time.Now(),
+		ip:      clientIP(r),
+		status:  http.StatusOK,
+		headers: copyCandidateHeaders(r.Header),
 	}
 }
 
@@ -428,7 +437,9 @@ func (s *sink) flush(rec *record) {
 		rec.model = string(m[1])
 	}
 	rec.isStream = streamPattern.Match(rec.peek)
-	rec.sessionKey = extractSessionKey(rec.path, rec.peek)
+	// 会话键单点决策（08-design §4）：识别 harness → profile 候选序取键 →
+	// 未识别走通用回退（body 提取，路径门控）。
+	rec.harness, rec.sessionKey = resolveSessionKey(rec.headers, rec.path, rec.peek)
 
 	// token 用量：响应缓冲尾部窗口扫描（与旧"读 .tmp 尾部"同口径，数据源换成内存）。
 	usage := usageTail(rec.resBuf)
@@ -448,6 +459,7 @@ func (s *sink) flush(rec *record) {
 		E:  rec.errMsg,
 		IP: rec.ip,
 		K:  sessionKeyHash(rec.sessionKey),
+		H:  rec.harness,
 		// 段式打包（D-P5）：索引行带 seg/off/ln；qz/rz 由 packPayload 的独立判定给出
 		QZ:  reqGz,
 		RZ:  resGz,
@@ -494,6 +506,240 @@ func (s *sink) appendIndex(day time.Time, entry indexEntry) {
 	}
 }
 
+// ------------------------------------------------------------------
+// 会话聚合：客户端识别与策略化会话键提取（08-session-aggregation-design）
+// ------------------------------------------------------------------
+
+// 头值参与哈希前的截断上限（§6.2）：会话 ID 实际为 UUID/短 ID，
+// 截断防异常超长头撑大索引。
+const (
+	headerValueLimit = 128
+	userAgentLimit   = 256
+)
+
+// bodyKeyExtractor 从请求体提取会话键（复用现有 pattern）。
+type bodyKeyExtractor func(peek []byte) string
+
+// detectRule 是一条 harness 识别规则，非零字段即生效。
+type detectRule struct {
+	header    string                 // 头存在性 / 头值检测（规范名）
+	headerHas string                 // 非空则要求头值以该前缀开头（如 Originator: codex*）
+	userAgent string                 // 非空则要求 UA 以该前缀开头（规避版本号变化）
+	bodyHas   func(peek []byte) bool // body 特征（peek），如 claude-code 的 metadata 签名
+}
+
+// keySource 是会话键的一个候选来源：头名非空优先，否则用 body 提取器。
+type keySource struct {
+	header string
+	body   bodyKeyExtractor
+}
+
+// harnessProfile 是一个客户端工具的识别与提取策略（声明式表，
+// 08-design §3 的证据表即此表的文档化）。
+type harnessProfile struct {
+	name        string       // 索引 h 字段值；固定词表：dsh / codex / claude-code / opencode
+	detect      []detectRule // 有序识别规则：任一命中即认定
+	sessionKeys []keySource  // 有序会话键候选：首个非空生效
+}
+
+// promptCacheKeyOf 提取 OpenAI 系协议的 prompt_cache_key。
+func promptCacheKeyOf(peek []byte) string {
+	if m := promptCacheKeyPattern.FindSubmatch(peek); len(m) == 2 {
+		return string(m[1])
+	}
+	return ""
+}
+
+// metadataSessionIdOf 提取 Claude Messages 协议 metadata.user_id 内嵌的 session_id。
+func metadataSessionIdOf(peek []byte) string {
+	scope := peek
+	if i := bytes.Index(peek, []byte(`"metadata"`)); i >= 0 {
+		scope = peek[i:]
+	}
+	if m := claudeSessionPattern.FindSubmatch(scope); len(m) == 2 {
+		return string(m[1])
+	}
+	return ""
+}
+
+// harnessProfiles 内置识别表（初版 4 条，顺序即识别优先级）。
+//
+// 明确排除的头（不进候选头集、不做检测）：X-Client-Request-Id、X-Opencode-Request
+// （请求级，会拆散会话）；User、X-Opencode-Project、X-Deepseek-Harness-User-Id
+// （用户/项目维度，会错误合并）。
+var harnessProfiles = []harnessProfile{
+	{
+		name: "dsh",
+		detect: []detectRule{
+			{header: "X-Deepseek-Harness-Session-Id"},
+			{userAgent: "deepseek-harness/"},
+		},
+		// pi-ai 栈默认不发任何会话标识（§3 识别与聚合解耦）：此时 h=dsh、k 缺省，
+		// 不聚合但工具可见；渠道配置后两头/体并存，候选序首个非空生效。
+		sessionKeys: []keySource{
+			{header: "X-Deepseek-Harness-Session-Id"},
+			{body: promptCacheKeyOf},
+		},
+	},
+	{
+		name: "codex",
+		detect: []detectRule{
+			{header: "Originator", headerHas: "codex"},
+		},
+		sessionKeys: []keySource{
+			{header: "Session-Id"},
+		},
+	},
+	{
+		name: "claude-code",
+		detect: []detectRule{
+			{userAgent: "claude-cli/"},
+			{header: "X-App", headerHas: "cli"},
+			// metadata.user_id 内嵌 session_id 的签名（现有提取器即为其设计）
+			{bodyHas: func(peek []byte) bool {
+				i := bytes.Index(peek, []byte(`"metadata"`))
+				return i >= 0 && metadataSessionIdOf(peek[i:]) != ""
+			}},
+		},
+		sessionKeys: []keySource{
+			{body: metadataSessionIdOf},
+			{body: promptCacheKeyOf},
+		},
+	},
+	{
+		name: "opencode",
+		detect: []detectRule{
+			{header: "X-Opencode-Session"},
+		},
+		sessionKeys: []keySource{
+			{header: "X-Opencode-Session"},
+		},
+	},
+}
+
+// candidateHeaders 是 begin 阶段拷贝的候选头快照：表内全部引用的头 + User-Agent
+// （X-Session-Id 为 dsh pi-ai 栈 compat 开启后的预留承接，§6.5）。检测与提取
+// 只读这份快照，不碰 http.Request。
+type candidateHeaders struct {
+	deepseekSession string // X-Deepseek-Harness-Session-Id
+	xSessionId      string // X-Session-Id（预留）
+	sessionId       string // Session-Id
+	opencodeSession string // X-Opencode-Session
+	originator      string // Originator
+	xApp            string // X-App（claude-code 检测）
+	userAgent       string // User-Agent（截 256B）
+}
+
+// get 按规范头名取拷贝值：detectRule.header / keySource.header 的唯一查表面，
+// 与 copyCandidateHeaders 的字段一一对应，新增候选头时两处同步。
+func (c candidateHeaders) get(name string) string {
+	switch name {
+	case "X-Deepseek-Harness-Session-Id":
+		return c.deepseekSession
+	case "X-Session-Id":
+		return c.xSessionId
+	case "Session-Id":
+		return c.sessionId
+	case "X-Opencode-Session":
+		return c.opencodeSession
+	case "Originator":
+		return c.originator
+	case "X-App":
+		return c.xApp
+	case "User-Agent":
+		return c.userAgent
+	}
+	return ""
+}
+
+func truncateHeader(v string) string {
+	if len(v) > headerValueLimit {
+		return v[:headerValueLimit]
+	}
+	return v
+}
+
+func truncateUserAgent(v string) string {
+	if len(v) > userAgentLimit {
+		return v[:userAgentLimit]
+	}
+	return v
+}
+
+// copyCandidateHeaders 拷贝 harnessProfiles 声明的全部候选头（值截断见 §6.2）。
+func copyCandidateHeaders(h http.Header) candidateHeaders {
+	return candidateHeaders{
+		deepseekSession: truncateHeader(h.Get("X-Deepseek-Harness-Session-Id")),
+		xSessionId:      truncateHeader(h.Get("X-Session-Id")),
+		sessionId:       truncateHeader(h.Get("Session-Id")),
+		opencodeSession: truncateHeader(h.Get("X-Opencode-Session")),
+		originator:      truncateHeader(h.Get("Originator")),
+		xApp:            truncateHeader(h.Get("X-App")),
+		userAgent:       truncateUserAgent(h.Get("User-Agent")),
+	}
+}
+
+// ruleMatches 判定单条识别规则。
+func ruleMatches(rule detectRule, h candidateHeaders, peek []byte) bool {
+	if rule.header != "" {
+		v := h.get(rule.header)
+		if rule.headerHas != "" {
+			return strings.HasPrefix(v, rule.headerHas)
+		}
+		return v != ""
+	}
+	if rule.userAgent != "" {
+		return strings.HasPrefix(h.userAgent, rule.userAgent)
+	}
+	if rule.bodyHas != nil {
+		return rule.bodyHas(peek)
+	}
+	return false
+}
+
+// detectHarness 按表序识别客户端：第一个 detect 命中的 profile（表内规则互斥，
+// 表序仅定义确定性，§6.1）；未命中返回 nil。
+func detectHarness(h candidateHeaders, peek []byte) *harnessProfile {
+	for i := range harnessProfiles {
+		p := &harnessProfiles[i]
+		for _, rule := range p.detect {
+			if ruleMatches(rule, h, peek) {
+				return p
+			}
+		}
+	}
+	return nil
+}
+
+// sessionKeyOf 按 profile 候选序取首个非空值（§6.1）；全部候选为空返回空串。
+func (p *harnessProfile) sessionKeyOf(h candidateHeaders, peek []byte) string {
+	for _, src := range p.sessionKeys {
+		if src.header != "" {
+			if v := h.get(src.header); v != "" {
+				return v
+			}
+			continue
+		}
+		if src.body != nil {
+			if v := src.body(peek); v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+// resolveSessionKey 是 flush 的单点决策（§4）：识别 → profile 候选序取键 →
+// 未识别走通用回退（现有 body 提取，路径门控，行为与现状完全一致，h 缺省）。
+// profile 命中但全部候选为空 → h 写入、k 缺省（行不聚合但工具可见）。
+func resolveSessionKey(h candidateHeaders, path string, peek []byte) (harness, key string) {
+	p := detectHarness(h, peek)
+	if p == nil {
+		return "", extractSessionKey(path, peek)
+	}
+	return p.name, p.sessionKeyOf(h, peek)
+}
+
 // extractSessionKey 按协议取会话标识；取不到就返回空串（看板按请求级展示）。
 //
 // 只认“会话级”字段：
@@ -501,20 +747,13 @@ func (s *sink) appendIndex(day time.Time, entry indexEntry) {
 // - Claude Messages：metadata.user_id 内的 session_id（Claude Code 会自动带）
 //
 // 刻意不用 `user` / 纯 user_id：那是用户维度，会把同一用户的多个会话错误合并。
+// 也是未识别客户端的通用回退入口（08-design §6.3），语义与体提取时代一致。
 func extractSessionKey(path string, peek []byte) string {
 	switch path {
 	case "/v1/responses", "/v1/chat/completions", "/v1/completions":
-		if m := promptCacheKeyPattern.FindSubmatch(peek); len(m) == 2 {
-			return string(m[1])
-		}
+		return promptCacheKeyOf(peek)
 	case "/v1/messages":
-		scope := peek
-		if i := bytes.Index(peek, []byte(`"metadata"`)); i >= 0 {
-			scope = peek[i:]
-		}
-		if m := claudeSessionPattern.FindSubmatch(scope); len(m) == 2 {
-			return string(m[1])
-		}
+		return metadataSessionIdOf(peek)
 	}
 	return ""
 }
