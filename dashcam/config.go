@@ -48,21 +48,50 @@ const (
 	defaultQueueCap   = 256
 	defaultConnsHost  = 2048 // 转发侧背板：超限排队而非新建连接，≈465 QPS 持续
 	defaultIdleBackup = 120 * time.Second
+
+	// MAX_*_BYTES 上界：段头长度字段为 uint32（pack.go），须 < 4 GiB；1 GiB 为实用上限
+	maxBytesUpperBound = 1 << 30
 )
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Listen:          env("LISTEN", "127.0.0.1:3090"),
-		DashcamDir:      env("DASHCAM_DIR", "./data/dashcam"),
-		MaxRequest:      envInt64("MAX_REQUEST_BYTES", defaultMaxBytes),
-		MaxResponse:     envInt64("MAX_RESPONSE_BYTES", defaultMaxBytes),
-		GzipOver:        envInt64("GZIP_THRESHOLD", defaultGzipOver),
-		HeaderTimeout:   envDuration("UPSTREAM_HEADER_TIMEOUT", 300*time.Second),
-		MemBudget:       envInt64("DASHCAM_MEM_BUDGET", defaultMemBudget),
-		FlushWorkers:    int(envInt64("DASHCAM_FLUSH_WORKERS", defaultWorkers)),
-		QueueCap:        int(envInt64("DASHCAM_QUEUE_CAP", defaultQueueCap)),
-		MaxConnsPerHost: int(envInt64("UPSTREAM_MAX_CONNS_PER_HOST", defaultConnsHost)),
-		IdleTimeout:     envDuration("IDLE_TIMEOUT", defaultIdleBackup),
+		Listen:     env("LISTEN", "127.0.0.1:3090"),
+		DashcamDir: env("DASHCAM_DIR", "./data/dashcam"),
+	}
+
+	var err error
+	if cfg.MaxRequest, err = envInt64("MAX_REQUEST_BYTES", defaultMaxBytes); err != nil {
+		return cfg, err
+	}
+	if cfg.MaxResponse, err = envInt64("MAX_RESPONSE_BYTES", defaultMaxBytes); err != nil {
+		return cfg, err
+	}
+	if cfg.GzipOver, err = envInt64("GZIP_THRESHOLD", defaultGzipOver); err != nil {
+		return cfg, err
+	}
+	if cfg.HeaderTimeout, err = envDuration("UPSTREAM_HEADER_TIMEOUT", 300*time.Second); err != nil {
+		return cfg, err
+	}
+	if cfg.MemBudget, err = envInt64("DASHCAM_MEM_BUDGET", defaultMemBudget); err != nil {
+		return cfg, err
+	}
+	var workers int64
+	if workers, err = envInt64("DASHCAM_FLUSH_WORKERS", defaultWorkers); err != nil {
+		return cfg, err
+	}
+	cfg.FlushWorkers = int(workers)
+	var queueCap int64
+	if queueCap, err = envInt64("DASHCAM_QUEUE_CAP", defaultQueueCap); err != nil {
+		return cfg, err
+	}
+	cfg.QueueCap = int(queueCap)
+	var conns int64
+	if conns, err = envInt64("UPSTREAM_MAX_CONNS_PER_HOST", defaultConnsHost); err != nil {
+		return cfg, err
+	}
+	cfg.MaxConnsPerHost = int(conns)
+	if cfg.IdleTimeout, err = envDuration("IDLE_TIMEOUT", defaultIdleBackup); err != nil {
+		return cfg, err
 	}
 
 	rawUpstream := env("UPSTREAM", "http://127.0.0.1:3000")
@@ -80,9 +109,22 @@ func loadConfig() (config, error) {
 	if cfg.MaxRequest <= 0 || cfg.MaxResponse <= 0 {
 		return cfg, fmt.Errorf("MAX_REQUEST_BYTES / MAX_RESPONSE_BYTES 必须为正数")
 	}
+	// 段头长度字段是 uint32（>4GiB 会回绕致段损坏），实用上界压到 1 GiB 防误配
+	if cfg.MaxRequest > maxBytesUpperBound || cfg.MaxResponse > maxBytesUpperBound {
+		return cfg, fmt.Errorf(
+			"MAX_REQUEST_BYTES / MAX_RESPONSE_BYTES 上限 %d 字节（当前 R=%d S=%d）",
+			maxBytesUpperBound, cfg.MaxRequest, cfg.MaxResponse)
+	}
+	if cfg.HeaderTimeout < 0 {
+		return cfg, fmt.Errorf("UPSTREAM_HEADER_TIMEOUT 必须为非负时长")
+	}
 
-	cfg.SampleModulus = envInt64("SAMPLE_MODULUS", 0)
-	cfg.SampleKeep = envInt64("SAMPLE_KEEP", 1)
+	if cfg.SampleModulus, err = envInt64("SAMPLE_MODULUS", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.SampleKeep, err = envInt64("SAMPLE_KEEP", 1); err != nil {
+		return cfg, err
+	}
 	// 与 CAPTURE_PATHS 为空同款校验风格：启用时参数错 = 整体漏采，宁可启动失败。
 	if cfg.SampleModulus < 0 {
 		return cfg, fmt.Errorf("SAMPLE_MODULUS 必须为非负整数（0 = 关闭抽样）")
@@ -142,26 +184,28 @@ func env(key, fallback string) string {
 	return fallback
 }
 
-func envInt64(key string, fallback int64) int64 {
+func envInt64(key string, fallback int64) (int64, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return fallback
+		// 解析失败必须启动失败（与取值范围校验同一 fail-fast 风格）：
+		// 静默回退默认值会让运维以为生效的配置从未生效（如 SAMPLE_MODULUS=1o → 全量落盘）
+		return 0, fmt.Errorf("%s 必须是整数（当前 %q）", key, raw)
 	}
-	return v
+	return v, nil
 }
 
-func envDuration(key string, fallback time.Duration) time.Duration {
+func envDuration(key string, fallback time.Duration) (time.Duration, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("%s 必须是时长（如 30s / 5m，当前 %q）", key, raw)
 	}
-	return d
+	return d, nil
 }

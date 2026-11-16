@@ -78,9 +78,15 @@ func main() {
 		logEvent("info", "shutdown_begin", nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(ctx)
+		// Shutdown 超时 ≠ 优雅完成：SSE 可长达 10 分钟（nginx proxy_read_timeout 600s），
+		// 有活跃流式请求时 15s 必超时、在途请求被硬切断。必须记日志区分两种终态，
+		// 否则运维无法排障（客户端表现为请求中途失败，而服务端"看起来"正常退出）
+		if err := srv.Shutdown(ctx); err != nil {
+			// http.Server 不暴露在途计数，仅记录超时事实供运维区分两种终态
+			logEvent("warn", "shutdown_timeout", map[string]any{"error": err.Error()})
+		}
 		if sink != nil {
-			// 优雅停机排空队列：close(queue) → worker 清空后退出（D-P3 §11.5.4）。
+			// 停机排空：closed 标志置位 → 在途 finish 走 dropped，worker 排空队内残余（capture.go）
 			sink.closeAndWait()
 		}
 		close(idle)
