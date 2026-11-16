@@ -176,6 +176,7 @@ export function RequestTable({
                 {row.requestTruncated ? <Tag tone="warning">请求截断</Tag> : null}
                 {row.responseTruncated ? <Tag tone="warning">响应截断</Tag> : null}
                 {row.clientAborted ? <Tag tone="warning">客户端中断</Tag> : null}
+                {row.clientEosClosed ? <Tag>客户端收尾断开</Tag> : null}
                 {row.gzip.request || row.gzip.response ? <Tag>gz</Tag> : null}
               </div>
             </TableCell>
