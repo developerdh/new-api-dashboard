@@ -22,6 +22,8 @@ export const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
     "quota",
     "prompt_tokens",
     "completion_tokens",
+    // 缓存 token 拆分的载体列（queries/user.ts LOGS_OTHER_JSONB 裸引用，缺列时用户接口 500）
+    "other",
   ],
   quota_data: ["user_id", "username", "model_name", "created_at", "token_used", "quota"],
 };

@@ -18,7 +18,15 @@ import { sql } from "kysely";
 import { z } from "zod";
 
 import { CACHE_TTL_MS, cacheKey, getCache, getOrCache, type CacheScope } from "@/server/cache";
-import { toQueryIssues, type ApiGranularity, type ApiMeta, type QueryIssue } from "@/server/http";
+import { redactCredentials } from "@/server/db";
+import {
+  invalidQuery,
+  queryFailed,
+  toQueryIssues,
+  type ApiGranularity,
+  type ApiMeta,
+  type QueryIssue,
+} from "@/server/http";
 
 /** 粒度白名单（顺序固定，供 Zod enum 与 UI 复用）。 */
 export const GRANULARITIES = ["day", "week", "month"] as const;
@@ -129,6 +137,12 @@ const epochSecondsSchema = z
   })
   .pipe(z.number().int().min(0).max(MAX_EPOCH_SECONDS, "时间戳超出允许范围（Unix 秒）"));
 
+/**
+ * 全部查询端点共享的区间宽度上限（与沉默用户统计的 INACTIVE_MAX_RANGE_SECONDS 同口径）。
+ * 防御超大区间触发 logs/quota_data 全表聚合（趋势另有 MAX_TREND_BUCKETS 桶数上限）。
+ */
+export const QUERY_MAX_RANGE_SECONDS = 366 * 86_400;
+
 /** 公共查询参数 schema（未知参数被忽略；`limit` 缺省 20）。 */
 export const queryParamsSchema = z
   .object({
@@ -145,6 +159,10 @@ export const queryParamsSchema = z
   })
   .refine((value) => value.start < value.end, {
     message: "end 必须大于 start（区间为左闭右开）",
+    path: ["end"],
+  })
+  .refine((value) => value.end - value.start <= QUERY_MAX_RANGE_SECONDS, {
+    message: `查询区间上限 ${QUERY_MAX_RANGE_SECONDS / 86_400} 天，请缩小范围`,
     path: ["end"],
   });
 
@@ -164,6 +182,29 @@ export function normalizeQueryParams(
   }
   const { start, end, granularity, userId, modelName, limit } = parsed.data;
   return { start, end, granularity, userId, modelName, limit };
+}
+
+/**
+ * 查询类路由的统一 catch 兜底：`QueryValidationError` → 400；其余经脱敏记录后返回 500
+ * （错误详情不进响应体）。此前各路由复制同构逻辑，新增路由易遗漏 redactCredentials 等细节，
+ * 统一收口到此处。
+ */
+export function handleQueryError(scope: string, error: unknown): Response {
+  if (error instanceof QueryValidationError) return invalidQuery(error.issues);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[${scope}] query failed`, redactCredentials(message));
+  return queryFailed();
+}
+
+/**
+ * 数据库数值列 → 整数（PG 侧 `::bigint` 经 int8 解析器已多为 number，个别
+ * numeric/字符串形态兜底）。非有限值统一回落 0，避免 NaN 漏进响应。
+ * 查询层曾各自复制本实现（trend/user/model/overview/inactive/user-directory 六份），
+ * 现统一从此导出，避免口径漂移。
+ */
+export function toInteger(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 /* ------------------------------------------------------------------ */

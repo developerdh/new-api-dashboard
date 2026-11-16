@@ -54,10 +54,16 @@ function apiUnauthorized(): NextResponse {
   );
 }
 
-/** 仅保留站内相对路径，防开放重定向。 */
+/** 仅保留站内相对路径，防开放重定向（与 login-form 的 sanitizeNext 同口径）。 */
 function safeNext(pathname: string, search: string): string | undefined {
   const target = `${pathname}${search}`;
-  if (!target.startsWith("/") || target.startsWith("//") || target.startsWith("/login")) {
+  if (
+    !target.startsWith("/") ||
+    target.startsWith("//") ||
+    // 浏览器把 http(s) URL 中的 "\" 等同 "/"，"/\evil.com" 会跳外站，必须整体拒绝
+    target.includes("\\") ||
+    target.startsWith("/login")
+  ) {
     return undefined;
   }
   return target;

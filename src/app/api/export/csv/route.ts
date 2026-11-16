@@ -6,28 +6,18 @@
  */
 import { connection } from "next/server";
 
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, queryFailed } from "@/server/http";
-import { QueryValidationError } from "@/server/queries/common";
+import { clientIp } from "@/server/request-origin";
+import { handleQueryError } from "@/server/queries/common";
 import { exportRateLimiter } from "@/lib/rate-limit";
 import { buildCsvExport, resolveExportRequest } from "@/server/services/export.service";
-
-/** 客户端 IP：反代场景取 x-forwarded-for 首段；无则 unknown（进程内计数）。 */
-function clientIp(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded !== null) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first !== undefined && first !== "") return first;
-  }
-  return request.headers.get("x-real-ip")?.trim() || "unknown";
-}
 
 export async function GET(request: Request): Promise<Response> {
   await connection();
 
   const rate = exportRateLimiter.check(`export:${clientIp(request)}`);
   if (!rate.allowed) {
-    const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
+    // resetAt 与限流器同时间线（performance.now 单调时钟），不做时钟回拨换算
+    const retryAfter = Math.max(1, Math.ceil((rate.resetAt - performance.now()) / 1000));
     return Response.json(
       {
         ok: false,
@@ -45,9 +35,6 @@ export async function GET(request: Request): Promise<Response> {
     const payload = await buildCsvExport(exportRequest);
     return new Response(payload.stream, { headers: payload.headers });
   } catch (error) {
-    if (error instanceof QueryValidationError) return invalidQuery(error.issues);
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[export/csv] failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("export/csv", error);
   }
 }

@@ -8,6 +8,7 @@
  * 用户已删除、`display_name` 为 NULL/空白时返回空串，由展示层回落账号（见 `lib/user-label.ts`）。
  */
 import { getDb, type ReadOnlyDatabase } from "@/server/db";
+import { toInteger } from "@/server/queries/common";
 
 export interface UserDirectoryRow {
   id: number;
@@ -19,11 +20,6 @@ export interface UserIdentity {
   userId: number;
   username: string;
   displayName: string;
-}
-
-function toInteger(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 function clean(value: string | null | undefined): string {

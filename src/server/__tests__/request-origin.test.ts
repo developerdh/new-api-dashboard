@@ -1,7 +1,7 @@
 /** 单测：对外 origin 解析与同源判定（Next 的 request.url 不反映 Host）。 */
 import { describe, expect, it } from "vitest";
 
-import { externalOrigin, isSameOrigin } from "@/server/request-origin";
+import { clientIp, externalOrigin, isSameOrigin } from "@/server/request-origin";
 
 const URL_LOCAL = "http://localhost:3088/api/auth/login";
 
@@ -71,5 +71,25 @@ describe("isSameOrigin", () => {
   it("非法 Origin 被拒", () => {
     expect(isSameOrigin(req({ host: "dashboard.example.com" }), "null")).toBe(false);
     expect(isSameOrigin(req({ host: "dashboard.example.com" }), "%%%")).toBe(false);
+  });
+});
+
+describe("clientIp", () => {
+  it("优先取 X-Real-IP（nginx 固定为 $remote_addr，不可伪造）", () => {
+    expect(
+      clientIp(req({ "x-real-ip": "203.0.113.7", "x-forwarded-for": "1.2.3.4, 10.0.0.1" })),
+    ).toBe("203.0.113.7");
+  });
+
+  it("无 X-Real-IP 时回落 X-Forwarded-For 首段", () => {
+    expect(clientIp(req({ "x-forwarded-for": "1.2.3.4, 10.0.0.1" }))).toBe("1.2.3.4");
+  });
+
+  it("X-Real-IP 为空白时视为缺失", () => {
+    expect(clientIp(req({ "x-real-ip": "  ", "x-forwarded-for": "1.2.3.4" }))).toBe("1.2.3.4");
+  });
+
+  it("两个头都缺失返回 unknown（本地直连退化为进程内全局桶）", () => {
+    expect(clientIp(req({}))).toBe("unknown");
   });
 });

@@ -232,6 +232,18 @@ export function redactCredentials(text: string): string {
   return text.replace(/\/\/[^/@\s]*:[^/@\s]*@/g, "//***:***@");
 }
 
+/**
+ * 抹掉错误消息里的网络端点（IPv4[:port]、域名[:port]、localhost[:port]）。
+ * 供**对外响应**（/api/health 免鉴权）使用——pg 连接错误常带内网 `host:port`，
+ * 未登录者可借健康检查探测内网拓扑；日志侧仍用 redactCredentials 保留主机便于排障。
+ */
+export function redactNetworkEndpoints(text: string): string {
+  return text
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?/g, "***")
+    .replace(/(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(?::\d{1,5})?/g, "***")
+    .replace(/\blocalhost(?::\d{1,5})?/gi, "***");
+}
+
 function elapsedMs(startedAt: number): number {
   return Math.max(0, Math.round(performance.now() - startedAt));
 }
@@ -254,7 +266,11 @@ function toHealthError(error: unknown): DbHealthError {
     };
   }
   const message = error instanceof Error ? error.message : String(error);
-  return { code: "DB_UNAVAILABLE", message: redactCredentials(message) };
+  return {
+    code: "DB_UNAVAILABLE",
+    // 对外只留错误语义，凭据与内网端点均不回显
+    message: redactNetworkEndpoints(redactCredentials(message)),
+  };
 }
 
 /**

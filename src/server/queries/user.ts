@@ -15,6 +15,7 @@ import {
   EXCLUDE_STAT_USERS_SQL,
   LOG_TYPE_CONSUME,
   QueryValidationError,
+  toInteger,
   type Granularity,
   type QueryRange,
 } from "@/server/queries/common";
@@ -32,7 +33,7 @@ import { loadUserIdentities, loadUserIdentity } from "@/server/queries/user-dire
 export const RANKING_DEFAULT_LIMIT = 20;
 export const RANKING_MAX_LIMIT = 100;
 
-/** 响应行。`displayName` 为 users.display_name（昵称），查询未补齐时缺省、展示层回落账号。）*/
+/** 响应行。`displayName` 为 users.display_name（昵称），查询未补齐时缺省、展示层回落账号。 */
 export interface UserRankingRow {
   userId: number;
   username: string;
@@ -57,11 +58,6 @@ export interface RankingNameRow {
 export interface RankingRequestRow {
   user_id: number;
   request_count: number;
-}
-
-function toInteger(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 /** Top N 用户消耗聚合（§5.7 的聚合部分；username 另行取值以处理改名）。 */
@@ -253,16 +249,33 @@ export interface UserRequestCountRow {
 /**
  * logs.other 缓存字段 SQL 片段（跨语义口径实测见 db-schema-notes §3.7）。
  *
- * - other 为 JSON 对象文本；`LIKE '{%'` 兜底防未来脏值：非对象行按 0 计，聚合不会因
- *   jsonb 转换失败而整体报错（当前全表 type=2 行实测 100% 合法 JSON）。
+ * - other 为 JSON 对象文本；`LIKE '{%'` 兜底防未来脏值：非对象行按 0 计。
+ * - 数值键经 LOGS_JSONB_INT 整数守卫提取：对象内出现非数字文本时按缺失计 0，
+ *   聚合不会因 text 转换失败而整体报错（当前全表 type=2 行实测均为整数）。
  * - 语义分族以 `usage_semantic` 为准：`anthropic`（/v1/messages）的 prompt_tokens
  *   不含缓存；缺省（openai 语义）prompt_tokens 已含 cache_tokens——两族不能混算。
  */
 const LOGS_OTHER_JSONB = sql`(CASE WHEN other IS NOT NULL AND btrim(other) LIKE '{%' THEN other::jsonb ELSE NULL END)`;
+
+/**
+ * other 内数值键的守卫提取：仅接受「可选负号 + 数字（可带小数）」文本（转为整数），
+ * 其余（含科学计数法、非法文本）按缺失计 0。直接 `text::bigint` 遇脏值会抛
+ * invalid input syntax 使整个聚合 500。
+ */
+function logsJsonbInt(field: string) {
+  return sql<number>`COALESCE(
+    CASE
+      WHEN (${LOGS_OTHER_JSONB} ->> ${field}) ~ '^-?[0-9]+(\.[0-9]+)?$'
+      THEN ((${LOGS_OTHER_JSONB} ->> ${field})::numeric)::bigint
+      ELSE NULL
+    END,
+    0)`;
+}
+
 /** 缓存读取（命中）量。 */
-const LOGS_CACHE_READ = sql<number>`COALESCE((${LOGS_OTHER_JSONB} ->> 'cache_tokens')::bigint, 0)`;
+const LOGS_CACHE_READ = logsJsonbInt("cache_tokens");
 /** 缓存写入量（仅 anthropic 语义行存在该键）。 */
-const LOGS_CACHE_WRITE = sql<number>`COALESCE((${LOGS_OTHER_JSONB} ->> 'cache_creation_tokens')::bigint, 0)`;
+const LOGS_CACHE_WRITE = logsJsonbInt("cache_creation_tokens");
 /** anthropic 语义判定：该族 prompt_tokens 不含缓存，有效输入需补回读写量。 */
 const LOGS_IS_ANTHROPIC_SEMANTIC =
   sql<boolean>`COALESCE(${LOGS_OTHER_JSONB} ->> 'usage_semantic', '') = 'anthropic'`;

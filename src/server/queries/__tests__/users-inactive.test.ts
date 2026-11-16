@@ -17,11 +17,10 @@ vi.mock("@/server/queries/inactive", async (importOriginal) => {
 import { GET } from "@/app/api/users/inactive/route";
 import { clearCache } from "@/server/cache";
 import { QueryValidationError } from "@/server/queries/common";
+import type { ReadOnlyDatabase } from "@/server/db";
 import {
   INACTIVE_MAX_RANGE_SECONDS,
-  attachInactiveNames,
   buildCurrentActiveQuery,
-  buildInactiveNamesQuery,
   buildPrevActiveQuery,
   previousPeriod,
   runInactiveUsersQuery,
@@ -29,6 +28,10 @@ import {
   type InactiveUsersSnapshot,
   type PrevActiveRow,
 } from "@/server/queries/inactive";
+
+// runInactiveUsersQuery 在本文件被 mock（见上方 vi.mock）；集成用例需要真实实现
+const { runInactiveUsersQuery: runInactiveUsersQueryActual } =
+  await vi.importActual<typeof import("@/server/queries/inactive")>("@/server/queries/inactive");
 import type { Database } from "@/server/schema";
 import {
   INACTIVE_SOURCE,
@@ -126,14 +129,8 @@ describe("沉默用户 SQL 编译口径", () => {
     expect(compiled.parameters).toEqual([2, T0, T1]);
   });
 
-  it("用户名/昵称补齐：只对差集入选的 user_id 查 users，IN 参数化", () => {
-    const compiled = buildInactiveNamesQuery(db, [7, 9]).compile();
-
-    expect(compiled.sql).toContain('from "users"');
-    expect(compiled.sql).toContain('"display_name"');
-    expect(compiled.sql).toMatch(/"id" in \(\$1, \$2\)/);
-    expect(compiled.parameters).toEqual([7, 9]);
-  });
+  // 用户名/昵称补齐查询复用 user-directory（buildUserDirectoryQuery 编译口径见
+  // user-directory.test.ts），此处不重复断言
 });
 
 describe("selectInactiveCandidates：集合差集与排序", () => {
@@ -187,15 +184,62 @@ describe("selectInactiveCandidates：集合差集与排序", () => {
   });
 });
 
-describe("attachInactiveNames：账号 + 昵称与兜底", () => {
-  it("取 users.username / display_name，缺失或 NULL 留空串由前端兜底", () => {
-    const candidates = selectInactiveCandidates(PREV_ROWS, [{ user_id: 8 }], 100).rows;
-    const rows = attachInactiveNames(candidates, [
-      { id: 7, username: "alice", display_name: " 爱丽丝 " },
-      { id: 9, username: null, display_name: null },
+describe("runInactiveUsersQuery：差集入选后补齐账号与昵称", () => {
+  /** 按表名分发的最小假库：logs 两次查询分别返回上期/本期行，users 返回名称行。 */
+  function fakeInactiveDb(
+    prev: PrevActiveRow[],
+    current: Array<{ user_id: number }>,
+    users: Array<{ id: number; username: string | null; display_name: string | null }>,
+  ): ReadOnlyDatabase {
+    let logCalls = 0;
+    const chain = (table: string): Record<string, unknown> => {
+      const self: Record<string, unknown> = {
+        select: () => self,
+        distinct: () => self,
+        groupBy: () => self,
+        where: () => self,
+        execute: async () => {
+          if (table === "users") return users;
+          logCalls += 1;
+          return logCalls === 1 ? prev : current;
+        },
+      };
+      return self;
+    };
+    return { selectFrom: (table: string) => chain(table) } as unknown as ReadOnlyDatabase;
+  }
+
+  it("users.username / display_name 清洗与空串兜底（经 user-directory）", async () => {
+    const snapshot = await runInactiveUsersQueryActual(
+      { start: T0, end: T1 },
+      100,
+      fakeInactiveDb(
+        PREV_ROWS,
+        [{ user_id: 8 }],
+        [
+          { id: 7, username: "alice", display_name: " 爱丽丝 " },
+          { id: 9, username: null, display_name: null },
+        ],
+      ),
+    );
+    expect(snapshot.rows).toEqual([
+      {
+        userId: 7,
+        lastActiveAt: T0 - 3_600,
+        prevRequestCount: 100,
+        username: "alice",
+        displayName: "爱丽丝",
+      },
+      {
+        userId: 9,
+        lastActiveAt: T0 - 1_800,
+        prevRequestCount: 50,
+        username: "",
+        displayName: "",
+      },
     ]);
-    expect(rows[0]).toMatchObject({ username: "alice", displayName: "爱丽丝" });
-    expect(rows[1]).toMatchObject({ username: "", displayName: "" });
+    expect(snapshot.prevRange).toEqual({ start: PREV_START, end: T0 });
+    expect(snapshot.total).toBe(2);
   });
 });
 
@@ -207,14 +251,15 @@ describe("resolveInactiveParams 与缓存 key", () => {
     expect(resolveInactiveParams(url(`start=${T0}&end=${T1}&limit=200`)).limit).toBe(200);
   });
 
-  it("区间超过 366 天 → issues.path=range", () => {
+  it("区间超过 366 天 → 共享上限 400（公共 schema，path=end）", () => {
     const end = T0 + INACTIVE_MAX_RANGE_SECONDS + DAY;
     try {
       resolveInactiveParams(url(`start=${T0}&end=${end}`));
       throw new Error("应当抛错");
     } catch (error) {
       expect(error).toBeInstanceOf(QueryValidationError);
-      expect((error as QueryValidationError).issues[0]?.path).toBe("range");
+      // 上限统一由 queryParamsSchema 执行（服务层不再重复校验）
+      expect((error as QueryValidationError).issues[0]?.path).toBe("end");
     }
   });
 
@@ -277,7 +322,7 @@ describe("GET /api/users/inactive：响应与错误格式", () => {
       error: { code: string; issues?: Array<{ path: string }> };
     };
     expect(body.error.code).toBe("invalid_query");
-    expect(body.error.issues?.some((issue) => issue.path === "range")).toBe(true);
+    expect(body.error.issues?.some((issue) => issue.path === "end")).toBe(true);
     expect(runner).not.toHaveBeenCalled();
   });
 

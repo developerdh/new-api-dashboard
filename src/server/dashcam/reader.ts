@@ -198,9 +198,10 @@ export async function readDashcamBlob(input: ReadBlobInput): Promise<ReadBlobRes
         gzip: true,
         capped: decoded.capped || raw.capped,
       };
-    } catch (error) {
-      // 标记为 gz 但内容不是 gzip：回退到另一后缀
-      lastError = error;
+    } catch {
+      // 标记为 gz 但内容不是 gzip（损坏/截断）：按记录缺失降级（外溢会把
+      // 畸形文件变成 500），回退到另一后缀
+      lastError = new DashcamBlobMissingError("正文解压失败");
       continue;
     }
   }
@@ -266,7 +267,13 @@ async function readFromPack(input: ReadBlobInput, seg: ReadBlobSeg): Promise<Rea
         capped,
       };
     }
-    const decoded = await gunzipCapped(slice, max);
+    let decoded: Awaited<ReturnType<typeof gunzipCapped>>;
+    try {
+      decoded = await gunzipCapped(slice, max);
+    } catch {
+      // 段内 gzip 损坏：按记录缺失降级（与头部损坏同语义），不让错误外溢为 500
+      throw new DashcamBlobMissingError("段记录解压失败");
+    }
     return {
       text: decoded.text,
       bytes: Buffer.byteLength(decoded.text, "utf8"),

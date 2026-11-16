@@ -12,6 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", () => ({ connection: vi.fn(async () => undefined) }));
 
+// 本机可能真实安装 playwright（模块可加载、浏览器可用）——为让「未安装 → 503」
+// 用例不依赖环境，统一模拟 import("playwright") 失败（生产无浏览器环境即此路径）
+vi.mock("playwright", () => {
+  throw new Error("playwright not installed (test simulation)");
+});
+
 import { POST } from "@/app/api/snapshot/route";
 import { QueryValidationError } from "@/server/queries/common";
 import {
@@ -118,7 +124,11 @@ describe("路径与 query 白名单（防 SSRF）", () => {
 describe("文件名规则", () => {
   it("name 安全字符收敛 + 东八区时间戳", () => {
     expect(snapshotFilename("trend", NOW)).toBe("trend-20261111-1100.html");
-    expect(snapshotFilename("user 7/../x", NOW)).toBe("user-7-..-x-20261111-1100.html");
+    // 内部连续点收敛为单点（读侧白名单禁 `..`），保证写出的文件必然可读
+    expect(snapshotFilename("user 7/../x", NOW)).toBe("user-7-.-x-20261111-1100.html");
+    // 前导点/点串剥除（读侧要求首字符为字母数字）
+    expect(snapshotFilename("..", NOW)).toBe("snapshot-20261111-1100.html");
+    expect(snapshotFilename(".hidden", NOW)).toBe("hidden-20261111-1100.html");
     expect(snapshotFilename("///", NOW)).toBe("snapshot-20261111-1100.html");
   });
 });

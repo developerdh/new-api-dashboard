@@ -20,7 +20,16 @@ export async function GET(
   await connection();
 
   const { file } = await context.params;
-  const name = decodeURIComponent(file);
+  // 非法百分号转义（如 `%zz`）会抛 URIError，与白名单一致按 400 处理
+  let name: string;
+  try {
+    name = decodeURIComponent(file);
+  } catch {
+    return Response.json(
+      { ok: false, error: { code: "invalid_path", message: "非法快照文件名" } },
+      { status: 400, headers: NO_STORE },
+    );
+  }
 
   if (!isSnapshotFilename(name)) {
     return Response.json(

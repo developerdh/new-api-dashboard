@@ -9,14 +9,14 @@
 import { connection } from "next/server";
 
 import { cacheKey } from "@/server/cache";
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
+import { ok } from "@/server/http";
 import {
-  QueryValidationError,
-  SCOPE_TTL_MS,
   cachedQuery,
+  handleQueryError,
   metaFromParams,
   normalizeQueryParams,
+  QueryValidationError,
+  SCOPE_TTL_MS,
 } from "@/server/queries/common";
 import { MAX_TREND_BUCKETS, trendBuckets } from "@/server/queries/trend";
 import {
@@ -60,9 +60,6 @@ export async function GET(request: Request): Promise<Response> {
       source: MODEL_SOURCE,
     });
   } catch (error) {
-    if (error instanceof QueryValidationError) return invalidQuery(error.issues);
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[models/trend] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("models/trend", error);
   }
 }

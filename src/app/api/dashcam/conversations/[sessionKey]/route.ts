@@ -77,6 +77,7 @@ export async function GET(
         path: turn.path,
         responseTruncated: turn.responseTruncated,
         gzip: turn.gzip,
+        ...(turn.seg === undefined ? {} : { seg: turn.seg }),
       })),
     );
     const data: DashcamThread = {

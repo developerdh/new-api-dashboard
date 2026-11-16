@@ -20,6 +20,7 @@ import {
   LOG_TYPE_CONSUME,
   MODEL_NAME_PATTERN,
   QueryValidationError,
+  toInteger,
   type Granularity,
   type QueryRange,
 } from "@/server/queries/common";
@@ -41,11 +42,6 @@ export const MODEL_CROSS_TOP_MODELS = 10;
 
 /** 数据来源标注：quota_data 聚合 + logs 请求数。 */
 export const MODEL_SOURCE = "quota_data+logs" as const;
-
-function toInteger(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
-}
 
 /* ------------------------------------------------------------------ */
 /* ranking                                                             */
@@ -87,6 +83,9 @@ export function buildModelRankingTotalsQuery(
     ])
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
+    // 与 user 维度口径一致：NULL 模型名不参与排行（IN 列表匹配不到 NULL、
+    // COUNT(DISTINCT model_name) 也忽略 NULL，不过滤会出现 modelName=null 行）
+    .where("model_name", "is not", null)
     .groupBy("model_name")
     .orderBy(sql`COALESCE(SUM(quota), 0)`, "desc")
     .orderBy("model_name", "asc")
@@ -249,6 +248,7 @@ export function buildTopModelsQuery(
     ])
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
+    .where("model_name", "is not", null)
     .groupBy("model_name")
     .orderBy(sql`COALESCE(SUM(quota), 0)`, "desc")
     .orderBy("model_name", "asc")
@@ -273,6 +273,7 @@ export function buildModelTrendQuotaQuery(
     ])
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
+    .where("model_name", "is not", null)
     .where("model_name", "in", modelNames)
     .groupBy(trendBucketExpression(granularity))
     .groupBy("model_name");
@@ -298,6 +299,7 @@ export function buildModelTrendRequestQuery(
     .where("type", "=", LOG_TYPE_CONSUME)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
+    .where("model_name", "is not", null)
     .where("model_name", "in", modelNames)
     .groupBy(trendBucketExpression(granularity))
     .groupBy("model_name");
@@ -381,7 +383,7 @@ export async function runModelTrendQuery(
 export interface ModelCrossUser {
   userId: number;
   username: string;
-  /** users.display_name（昵称）；由排行查询透传，缺失时展示层回落账号。）*/
+  /** users.display_name（昵称）；由排行查询透传，缺失时展示层回落账号。 */
   displayName?: string;
 }
 
@@ -425,6 +427,7 @@ export function buildModelCrossMatrixQuery(
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
     .where("user_id", "in", userIds)
+    .where("model_name", "is not", null)
     .where("model_name", "in", modelNames)
     .groupBy(["user_id", "model_name"]);
 }
@@ -455,8 +458,8 @@ export function assembleModelCross(
     users: users.map((user) => ({
       userId: user.userId,
       username: user.username,
-      // 未补齐昵称时不写入该键，保持旧响应形状（前端按可选字段处理）
-      ...(user.displayName === undefined ? {} : { displayName: user.displayName }),
+      // 上游排行恒回填 displayName（缺失昵称为空串），前端按可选字段回落账号
+      displayName: user.displayName,
     })),
     models,
     cells,

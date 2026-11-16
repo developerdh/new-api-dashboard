@@ -25,6 +25,7 @@ import {
   addShanghaiMonths,
   bucketStart,
   shanghaiDate,
+  toInteger,
   type Granularity,
   type QueryRange,
 } from "@/server/queries/common";
@@ -120,7 +121,6 @@ export function trendBucketExpression(granularity: Granularity) {
   return sql<number>`(EXTRACT(EPOCH FROM (DATE_TRUNC(${sql.lit(granularity)}, to_timestamp(created_at) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')))::bigint`;
 }
 
-/** quota_data 分桶聚合查询（§5.2–§5.4 + 桶内活跃用户）。 */
 /** quota_data 分桶聚合查询（§5.2–§5.4 + 桶内活跃用户）；`userId` 给定时只统计该用户。 */
 export function buildTrendQuotaQuery(
   db: ReadOnlyDatabase,
@@ -166,11 +166,6 @@ export function buildTrendRequestQuery(
 
   const filtered = userId === undefined ? base : base.where("user_id", "=", userId);
   return filtered.groupBy(trendBucketExpression(granularity));
-}
-
-function toInteger(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 /** 合并 quota_data 聚合与 logs 消费聚合（按桶起点；logs 缺失记 0）。 */

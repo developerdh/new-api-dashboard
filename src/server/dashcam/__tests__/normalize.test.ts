@@ -129,6 +129,28 @@ describe("非流式 JSON", () => {
     expect(envelope.response.error?.code).toBe("model_not_found");
     expect(envelope.response.parseError).toBeUndefined();
   });
+
+  it("/v1/completions：prompt 与 choices[0].text 展开为块，usage 正常提取", () => {
+    const request = JSON.stringify({ model: "gpt-3.5-turbo-instruct", prompt: "讲个笑话", stream: false });
+    const response = JSON.stringify({
+      id: "cmpl-mock",
+      object: "text_completion",
+      choices: [{ text: "这是一个笑话。", finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 8, total_tokens: 13 },
+    });
+    const envelope = normalize({ p: "/v1/completions" }, request, response);
+    expect(envelope.request.protocol).toBe("openai-completions");
+    expect(envelope.request.messages[0]?.role).toBe("user");
+    expect(envelope.request.messages[0]?.text).toBe("讲个笑话");
+    expect(envelope.response.outputs[0]?.text).toBe("这是一个笑话。");
+    expect(envelope.response.finishReason).toBe("stop");
+    expect(envelope.response.usage).toEqual({
+      promptTokens: 5,
+      completionTokens: 8,
+      totalTokens: 13,
+    });
+    expect(envelope.response.parseError).toBeUndefined();
+  });
 });
 
 describe("流式 SSE", () => {

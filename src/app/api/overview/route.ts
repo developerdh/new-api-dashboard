@@ -8,9 +8,8 @@
  */
 import { connection } from "next/server";
 
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
-import { QueryValidationError, metaFromParams } from "@/server/queries/common";
+import { ok } from "@/server/http";
+import { handleQueryError, metaFromParams } from "@/server/queries/common";
 import {
   OVERVIEW_SOURCE,
   getOverview,
@@ -25,12 +24,7 @@ export async function GET(request: Request): Promise<Response> {
     const { data, cached } = await getOverview(params);
     return ok(data, { ...metaFromParams(params, cached), source: OVERVIEW_SOURCE });
   } catch (error) {
-    if (error instanceof QueryValidationError) {
-      return invalidQuery(error.issues);
-    }
     // 只记录脱敏后的消息，完整错误（含 SQL/连接串）不进入响应体
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[overview] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("overview", error);
   }
 }

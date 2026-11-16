@@ -3,19 +3,20 @@
  *
  * 参数：`start`/`end`（必填）、`granularity=day|week|month`（缺省 day）。
  * 响应：`{ ok, data: { points: TrendPoint[] }, meta: { range, granularity, cached, source } }`
- * 说明：复用 的桶序列/合并逻辑，仅加 userId 过滤；桶数上限同全局趋势（1000 → 400）。
+ * 说明：复用 `src/server/queries/trend.ts` 的桶序列/合并逻辑，仅加 userId 过滤；
+ * 桶数上限（1000）为服务端纵深防御——公共参数已被 366 天共享区间上限约束，经路由不可触达。
  */
 import { connection } from "next/server";
 
 import { cacheKey } from "@/server/cache";
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
+import { ok } from "@/server/http";
 import {
-  QueryValidationError,
-  SCOPE_TTL_MS,
   cachedQuery,
+  handleQueryError,
   metaFromParams,
   normalizeQueryParams,
+  QueryValidationError,
+  SCOPE_TTL_MS,
 } from "@/server/queries/common";
 import { MAX_TREND_BUCKETS, toTrendPoints, trendBuckets } from "@/server/queries/trend";
 import {
@@ -66,9 +67,6 @@ export async function GET(
       source: USER_DETAIL_SOURCE,
     });
   } catch (error) {
-    if (error instanceof QueryValidationError) return invalidQuery(error.issues);
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[users/:id/trend] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("users/:id/trend", error);
   }
 }
