@@ -260,6 +260,9 @@ export function DashcamDetailDialog({
                   ) : null}
                   {row.clientAborted ? <Tag tone="warning">客户端中断</Tag> : null}
                   {row.clientEosClosed ? <Tag>客户端收尾断开</Tag> : null}
+                  {row.harness === undefined ? null : (
+                    <Tag title={`客户端 harness：${row.harness}（采集侧识别）`}>{row.harness}</Tag>
+                  )}
                   {row.model === "" ? null : <span className="text-[11px] text-muted-foreground">{row.model}</span>}
                 </>
               )}

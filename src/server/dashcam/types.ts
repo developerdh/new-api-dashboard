@@ -56,6 +56,12 @@ export interface DashcamIndexEntry {
   /** 会话键哈希（sha256(key) 前 16 位）；缺失表示该请求没有可用会话标识 */
   k?: string;
   /**
+   * 客户端 harness 名（采集端识别，08-session-aggregation-design §7）。
+   * 采集端固定词表 dsh / codex / claude-code / opencode（可随演进扩展），
+   * 读取侧宽松校验 `[a-z0-9-]{1,32}`；未识别客户端缺省。仅识别标签，不参与聚合。
+   */
+  h?: string;
+  /**
    * token 用量（采集时从响应正文 best-effort 提取，见 dashcam/usage.go）：
    * pt=输入 / ct=输出 / cc=缓存命中输入 / cw=缓存写入。
    * 旧版采集或解析失败时缺省，看板对这类行回退到读时水合或显示 —。
@@ -137,6 +143,8 @@ export interface DashcamSessionRow {
   ip?: string;
   /** 会话键哈希；缺失时该请求独立成行（未聚合） */
   sessionKey?: string;
+  /** 客户端 harness 名（索引 `h` 解码）；未识别客户端缺省，仅展示不参与聚合 */
+  harness?: string;
   /** 该请求的 token 用量（正文可读且解析成功时由服务端水合） */
   usage?: DashcamUsage;
   /** 段式定位（usage 水合兜底读正文用；索引 seg/off/ln，旧布局行缺省） */
@@ -191,6 +199,8 @@ export interface DashcamThreadTurn {
   /** 客户端断开时响应已含流结束标记（索引 tr bit8）：收尾断开，记录完整 */
   clientEosClosed: boolean;
   gzip: { request: boolean; response: boolean };
+  /** 客户端 harness 名（索引 `h` 解码）；未识别客户端缺省，仅展示不参与聚合 */
+  harness?: string;
   /** 该轮的 token 用量（线程接口按预算水合最近若干轮，其余轮缺省） */
   usage?: DashcamUsage;
   /** 段式定位（usage 水合兜底读正文用；索引 seg/off/ln，旧布局行缺省） */

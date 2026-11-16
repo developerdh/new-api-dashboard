@@ -46,6 +46,11 @@ export const MAX_GROUP_SCAN_REQUESTS = 10_000;
 export const MAX_THREAD_TURNS = 200;
 /** 会话键哈希：16 位小写十六进制（采集侧 `sha256(key)[:16]`） */
 const SESSION_KEY_PATTERN = /^[0-9a-f]{16}$/;
+/**
+ * 索引 `h` 字段（客户端 harness 名）：采集端固定词表 dsh / codex / claude-code /
+ * opencode，读取侧宽松校验——供应商演进加词时不要求看板同步发版（08-design §7）。
+ */
+const HARNESS_PATTERN = /^[a-z0-9-]{1,32}$/;
 /** 索引解析结果缓存 TTL 下限/上限（毫秒）。 */
 const MIN_CACHE_TTL_MS = 1_000;
 const MAX_CACHE_TTL_MS = 300_000;
@@ -142,6 +147,7 @@ export function parseIndexLine(line: string): DashcamIndexEntry | null {
   const fp = toText(record.u);
   const startedAt = toText(record.d);
   const sessionKey = toText(record.k);
+  const harness = toText(record.h);
   if (!TRACE_PATTERN.test(trace)) return null;
   if (!FINGERPRINT_PATTERN.test(fp)) return null;
   if (startedAt === "" || Number.isNaN(Date.parse(startedAt))) return null;
@@ -171,6 +177,7 @@ export function parseIndexLine(line: string): DashcamIndexEntry | null {
     ...(toText(record.e) === "" ? {} : { e: toText(record.e) }),
     ...(toText(record.ip) === "" ? {} : { ip: toText(record.ip) }),
     ...(SESSION_KEY_PATTERN.test(sessionKey) ? { k: sessionKey } : {}),
+    ...(HARNESS_PATTERN.test(harness) ? { h: harness } : {}),
     ...(optionalPositiveInt(record.pt) === undefined ? {} : { pt: optionalPositiveInt(record.pt) }),
     ...(optionalPositiveInt(record.ct) === undefined ? {} : { ct: optionalPositiveInt(record.ct) }),
     ...(optionalPositiveInt(record.cc) === undefined ? {} : { cc: optionalPositiveInt(record.cc) }),
@@ -324,6 +331,7 @@ export function toSessionRow(entry: DashcamIndexEntry, date: string): DashcamSes
     ...(entry.e === undefined ? {} : { error: entry.e }),
     ...(entry.ip === undefined ? {} : { ip: entry.ip }),
     ...(entry.k === undefined ? {} : { sessionKey: entry.k }),
+    ...(entry.h === undefined ? {} : { harness: entry.h }),
   };
 }
 
@@ -633,6 +641,7 @@ export async function scanThread(input: ThreadScanInput): Promise<ThreadScanResu
       gzip: { request: entry.qz, response: entry.rz },
       ...(usageOfIndexEntry(entry) === undefined ? {} : { usage: usageOfIndexEntry(entry) }),
       ...(segRefOf(entry) === undefined ? {} : { seg: segRefOf(entry) }),
+      ...(entry.h === undefined ? {} : { harness: entry.h }),
       prev: previous === undefined ? null : { traceId: previous.entry.t, date: previous.date },
     };
   });

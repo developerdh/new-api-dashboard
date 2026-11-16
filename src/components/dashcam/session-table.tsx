@@ -178,6 +178,9 @@ export function RequestTable({
                 {row.clientAborted ? <Tag tone="warning">客户端中断</Tag> : null}
                 {row.clientEosClosed ? <Tag>客户端收尾断开</Tag> : null}
                 {row.gzip.request || row.gzip.response ? <Tag>gz</Tag> : null}
+                {row.harness === undefined ? null : (
+                  <Tag title={`客户端 harness：${row.harness}（采集侧识别）`}>{row.harness}</Tag>
+                )}
               </div>
             </TableCell>
             <TableCell className="whitespace-nowrap">

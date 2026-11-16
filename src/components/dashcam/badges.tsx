@@ -15,9 +15,12 @@ export function StatusBadge({ status }: { status: number }) {
 export function Tag({
   children,
   tone = "neutral",
+  title,
 }: {
   children: ReactNode;
   tone?: "neutral" | "info" | "warning" | "danger";
+  /** 悬停说明（可选）：用于中性标签补充语义，如 harness 名。 */
+  title?: string;
 }) {
   const tones: Record<string, string> = {
     neutral: "bg-muted text-muted-foreground",
@@ -26,7 +29,10 @@ export function Tag({
     danger: "bg-destructive/15 text-destructive",
   };
   return (
-    <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] ${tones[tone]}`}>
+    <span
+      title={title}
+      className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] ${tones[tone]}`}
+    >
       {children}
     </span>
   );
