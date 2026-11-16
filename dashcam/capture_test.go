@@ -88,6 +88,261 @@ func TestSessionKeyHash(t *testing.T) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 会话聚合：harness 识别与策略化会话键提取（08-design §8 测试矩阵）     */
+/* ------------------------------------------------------------------ */
+
+// resolveFor 构造候选头快照后跑 flush 的单点决策，返回 (h, 原始会话键)。
+func resolveFor(t *testing.T, headers http.Header, path, body string) (string, string) {
+	t.Helper()
+	return resolveSessionKey(copyCandidateHeaders(headers), path, []byte(body))
+}
+
+func TestHarnessDetectAndKeyMatrix(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers http.Header
+		path    string
+		body    string
+		wantH   string
+		wantKey string
+	}{
+		{
+			name:    "dsh：会话头命中，头键生效",
+			headers: http.Header{"X-Deepseek-Harness-Session-Id": {"dsh-sess-1"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m","messages":[]}`,
+			wantH:   "dsh",
+			wantKey: "dsh-sess-1",
+		},
+		{
+			name:    "dsh：UA 前缀命中，体 prompt_cache_key 生效",
+			headers: http.Header{"User-Agent": {"deepseek-harness/1.2.3"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m","prompt_cache_key":"pi-ai-sess"}`,
+			wantH:   "dsh",
+			wantKey: "pi-ai-sess",
+		},
+		{
+			name:    "dsh：头与体并存，候选序首个（头）生效",
+			headers: http.Header{"X-Deepseek-Harness-Session-Id": {"head-sess"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m","prompt_cache_key":"body-sess"}`,
+			wantH:   "dsh",
+			wantKey: "head-sess",
+		},
+		{
+			name:    "dsh：识别与提取解耦，无任何键时 h=dsh、k 缺省",
+			headers: http.Header{"User-Agent": {"deepseek-harness/1.2.3"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m","messages":[]}`,
+			wantH:   "dsh",
+			wantKey: "",
+		},
+		{
+			name:    "dsh：deepseek 栈体里没有 metadata 也不影响头键",
+			headers: http.Header{"X-Deepseek-Harness-Session-Id": {"dsh-sess-2"}},
+			path:    "/v1/messages",
+			body:    `{"model":"deepseek-chat","messages":[]}`,
+			wantH:   "dsh",
+			wantKey: "dsh-sess-2",
+		},
+		{
+			name:    "codex：Originator 前缀命中 + Session-Id",
+			headers: http.Header{"Originator": {"codex_cli_rs"}, "Session-Id": {"0198f39a-1111-7777-8000-000000000001"}},
+			path:    "/v1/responses",
+			body:    `{"model":"m","input":[]}`,
+			wantH:   "codex",
+			wantKey: "0198f39a-1111-7777-8000-000000000001",
+		},
+		{
+			name:    "codex：Originator 非 codex 前缀不命中",
+			headers: http.Header{"Originator": {"vscode"}, "Session-Id": {"not-used"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m"}`,
+			wantH:   "",
+			wantKey: "",
+		},
+		{
+			name:    "codex：命中但无 Session-Id → h=codex、k 缺省",
+			headers: http.Header{"Originator": {"codex_cli_rs"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m"}`,
+			wantH:   "codex",
+			wantKey: "",
+		},
+		{
+			name:    "claude-code：UA 前缀命中，metadata.session_id 生效",
+			headers: http.Header{"User-Agent": {"claude-cli/2.0.0"}},
+			path:    "/v1/messages",
+			body:    `{"model":"claude","metadata":{"user_id":"{\"device_id\":\"d\",\"session_id\":\"cc-sess\"}"},"messages":[]}`,
+			wantH:   "claude-code",
+			wantKey: "cc-sess",
+		},
+		{
+			name:    "claude-code：X-App: cli 命中",
+			headers: http.Header{"X-App": {"cli"}},
+			path:    "/v1/messages",
+			body:    `{"model":"claude","metadata":{"user_id":"{\"session_id\":\"cc-sess\"}"}}`,
+			wantH:   "claude-code",
+			wantKey: "cc-sess",
+		},
+		{
+			name:    "claude-code：body metadata 签名命中（无头无 UA）",
+			headers: http.Header{},
+			path:    "/v1/messages",
+			body:    `{"model":"claude","metadata":{"user_id":"{\"session_id\":\"cc-sess\"}"}}`,
+			wantH:   "claude-code",
+			wantKey: "cc-sess",
+		},
+		{
+			name:    "claude-code：metadata 与 prompt_cache_key 并存，候选序首个（metadata）生效",
+			headers: http.Header{"User-Agent": {"claude-cli/2.0.0"}},
+			path:    "/v1/messages",
+			body:    `{"model":"claude","metadata":{"user_id":"{\"session_id\":\"cc-sess\"}"},"prompt_cache_key":"cache-sess"}`,
+			wantH:   "claude-code",
+			wantKey: "cc-sess",
+		},
+		{
+			name:    "claude-code：无 metadata 会话时回退候选序第二（prompt_cache_key）",
+			headers: http.Header{"User-Agent": {"claude-cli/2.0.0"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m","prompt_cache_key":"cache-sess"}`,
+			wantH:   "claude-code",
+			wantKey: "cache-sess",
+		},
+		{
+			name:    "opencode：会话头命中",
+			headers: http.Header{"X-Opencode-Session": {"oc-sess-1"}},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m"}`,
+			wantH:   "opencode",
+			wantKey: "oc-sess-1",
+		},
+		{
+			name: "排除头不触发识别也不供键",
+			headers: http.Header{
+				"X-Client-Request-Id":        {"req-1"},
+				"X-Opencode-Request":         {"req-2"},
+				"User":                       {"u1"},
+				"X-Opencode-Project":         {"p1"},
+				"X-Deepseek-Harness-User-Id": {"u2"},
+			},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m"}`,
+			wantH:   "",
+			wantKey: "",
+		},
+		{
+			name:    "未识别：回退取 body prompt_cache_key（h 缺省）",
+			headers: http.Header{},
+			path:    "/v1/chat/completions",
+			body:    `{"model":"m","prompt_cache_key":"plain-sess"}`,
+			wantH:   "",
+			wantKey: "plain-sess",
+		},
+		{
+			name:    "未识别：非白名单路径不提取（路径门控保留）",
+			headers: http.Header{},
+			path:    "/v1beta/models/x:generateContent",
+			body:    `{"prompt_cache_key":"should-not-be-used"}`,
+			wantH:   "",
+			wantKey: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, key := resolveFor(t, c.headers, c.path, c.body)
+			if h != c.wantH {
+				t.Fatalf("h = %q, want %q", h, c.wantH)
+			}
+			if key != c.wantKey {
+				t.Fatalf("会话键 = %q, want %q", key, c.wantKey)
+			}
+		})
+	}
+}
+
+func TestHarnessFallbackByteIdentical(t *testing.T) {
+	// §8：未识别客户端的回退语义与现状逐字节一致——resolveSessionKey 空
+	// 候选头的结果必须等于直接调 extractSessionKey。
+	cases := []struct{ path, body string }{
+		{"/v1/responses", `{"model":"m","input":[],"prompt_cache_key":"s1"}`},
+		{"/v1/chat/completions", `{"model":"m","messages":[],"prompt_cache_key":"s2"}`},
+		{"/v1/completions", `{"model":"m","prompt":"x","prompt_cache_key":"s3"}`},
+		{"/v1/messages", `{"model":"c","metadata":{"user_id":"user-1"}}`},
+		{"/v1/messages", `{"model":"c","messages":[]}`},
+		{"/v1beta/models/x:generateContent", `{"prompt_cache_key":"s5"}`},
+	}
+	for _, c := range cases {
+		h, key := resolveFor(t, http.Header{}, c.path, c.body)
+		if h != "" {
+			t.Fatalf("空候选头不应识别出 harness: %q", h)
+		}
+		if want := extractSessionKey(c.path, []byte(c.body)); key != want {
+			t.Fatalf("回退应与 extractSessionKey 逐字节一致: path=%s got=%q want=%q", c.path, key, want)
+		}
+	}
+}
+
+func TestHarnessHeaderValueTruncation(t *testing.T) {
+	// §6.2：头值截 128B 后参与哈希；UA 截 256B，前缀在窗口内不受影响。
+	long := strings.Repeat("a", 200)
+	h, key := resolveFor(t, http.Header{"X-Opencode-Session": {long}}, "/v1/chat/completions", `{}`)
+	if h != "opencode" {
+		t.Fatalf("超长头仍应识别 opencode: h=%q", h)
+	}
+	if key != strings.Repeat("a", 128) {
+		t.Fatalf("头值应截断到 128B，得到 len=%d", len(key))
+	}
+	if got, want := sessionKeyHash(key), sessionKeyHash(strings.Repeat("a", 128)); got != want {
+		t.Fatalf("哈希应基于截断后的值: got=%s", got)
+	}
+
+	uaLive := "deepseek-harness/1.0.0 " + strings.Repeat("x", 300)
+	if h, _ := resolveFor(t, http.Header{"User-Agent": {uaLive}}, "/v1/chat/completions", `{}`); h != "dsh" {
+		t.Fatalf("UA 截断不应影响 256B 内的前缀检测: h=%q", h)
+	}
+	// 前缀落在 256B 窗口之外：截断生效，不应命中
+	uaLate := strings.Repeat("x", 260) + " deepseek-harness/1.0.0"
+	if h, _ := resolveFor(t, http.Header{"User-Agent": {uaLate}}, "/v1/chat/completions", `{}`); h != "" {
+		t.Fatalf("256B 截断之后的前缀不应参与检测: h=%q", h)
+	}
+}
+
+func TestHarnessIndexEntry(t *testing.T) {
+	// §8：h 落索引；未识别行 omitempty（JSON 中无 h 字段），聚合口径零变化。
+	s := newTestSink(t, nil)
+
+	codexReq := testCaptureRequest(t, "0123456789abcdef0123456789abcdef")
+	codexReq.Header.Set("Originator", "codex_cli_rs")
+	codexReq.Header.Set("Session-Id", "codex-sess-42")
+	codex := s.begin(codexReq, testFP)
+	codex.writeRequest([]byte(`{"model":"m","messages":[]}`))
+	codex.finish("")
+
+	plain := s.begin(testCaptureRequest(t, ""), testFP)
+	plain.writeRequest([]byte(`{"model":"m","prompt_cache_key":"plain-sess"}`))
+	plain.finish("")
+
+	lines := waitIndexLines(t, s.cfg.DashcamDir, 2)
+	codexEntry := parseIndexEntry(t, lines[0])
+	if codexEntry.H != "codex" {
+		t.Fatalf("识别结果应落索引 h 字段: %+v", codexEntry)
+	}
+	if codexEntry.K != sessionKeyHash("codex-sess-42") {
+		t.Fatalf("k 应为头键哈希: %+v", codexEntry)
+	}
+	if strings.Contains(lines[1], `"h":`) {
+		t.Fatalf("未识别行不应带 h 字段（omitempty）: %s", lines[1])
+	}
+	plainEntry := parseIndexEntry(t, lines[1])
+	if plainEntry.H != "" || plainEntry.K != sessionKeyHash("plain-sess") {
+		t.Fatalf("未识别行应走回退且无 h: %+v", plainEntry)
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* D-P3 异步落盘语义：慢盘注入、队满、预算截停、优雅停机                  */
 /* ------------------------------------------------------------------ */
 
