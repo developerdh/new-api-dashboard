@@ -157,6 +157,7 @@ flags: bit0=req gzip(qz)  bit1=res gzip(rz)  bit2=req 截断  bit3=res 截断
 | `e` | string | 上游错误信息，成功时省略 |
 | `ip` | string | 客户端 IP |
 | `k` | string | 会话键哈希（sha256(key) 前 16 位十六进制），无会话标识时省略 |
+| `h` | string | 客户端 harness 名（识别结果，仅标签不参与聚合）：采集端固定词表 `dsh / codex / claude-code / opencode`，随演进可加词；读取侧宽松校验 `[a-z0-9-]{1,32}`，未识别客户端省略 |
 | `pt` / `ct` | int | token 用量：输入 / 输出。采集时从响应正文 best-effort 提取（尾部窗口扫描 usage 对象，`dashcam/usage.go`），失败或旧版采集省略 |
 | `cc` / `cw` | int | token 用量：缓存命中输入 / 缓存写入。零值省略 |
 | `seg` | string | 段式打包（D-P5）：记录所在段文件名 `seg-<HH>-<seq>.pack`。**缺失 = 旧的两文件布局**（`<trace>.req[.gz]` / `.res[.gz]`），读取方按此选路径 |
@@ -174,6 +175,10 @@ flags: bit0=req gzip(qz)  bit1=res gzip(rz)  bit2=req 截断  bit3=res 截断
 ### 5.1 为什么索引里没有提示词
 
 索引只存元数据，正文在 blob 文件。这样列表页可以只读一个文件完成分页，无需打开每个 blob；代价是列表无法直接做全文检索，检索需遍历 blob（见 §7.3）。
+
+### 5.2 会话键提取（harness 识别）
+
+`k` 的来源由「仅请求体」扩展为「识别客户端 → 按策略提取」：dashcam 内置四家 harness（dsh / Codex CLI / Claude Code / opencode）的识别规则与有序会话键候选（请求头 + 请求体白名单头），未识别客户端保持原有 body 提取（`prompt_cache_key` / `metadata.session_id`，按路径门控）不变；识别结果落在索引 `h` 字段。完整识别信号表、候选序、排除头清单与源码级证据见 [08-session-aggregation-design.md](08-session-aggregation-design.md) §3/§5。
 
 ## 6. 截断、压缩与容量
 
