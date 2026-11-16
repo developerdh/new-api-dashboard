@@ -63,7 +63,9 @@ const (
 )
 
 var (
-	tracePattern  = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
+	// 与看板侧（src/server/dashcam/paths.ts TRACE_PATTERN）及 02-design §4.1 对齐：8–71。
+	// 上限收窄到 64 会让 65–71 位的 X-Trace-Id 被静默替换为随机 id，trace 关联失效。
+	tracePattern  = regexp.MustCompile(`^[A-Za-z0-9._-]{8,71}$`)
 	modelPattern  = regexp.MustCompile(`"model"\s*:\s*"([^"\\]{1,128})"`)
 	streamPattern = regexp.MustCompile(`"stream"\s*:\s*true`)
 
@@ -96,9 +98,16 @@ type sink struct {
 	// 每个 chunk 一次 atomic add，预算超限触发三层降级（见 record.appendBuf/starve）。
 	buffered atomic.Int64
 
-	queue     chan *record
-	workers   sync.WaitGroup
-	closeOnce sync.Once
+	queue chan *record
+	// closed：停机标志。置位后 finish 一律走丢弃（dropped++），不再向队列发送——
+	// 队列永不 close，从根本上消除"优雅停机超时后仍在途的 handler 向已关闭
+	// channel 发送"的 panic（SSE 可长达 10 分钟，15s Shutdown 超时后必然出现）。
+	closed atomic.Bool
+	// done：worker 退出信号。置位（closed 之后）worker 先排空队列残余再退出。
+	// stopOnce 保证 closeAndWait 幂等（测试 cleanup 与主流程会双重调用）。
+	done     chan struct{}
+	stopOnce sync.Once
+	workers  sync.WaitGroup
 
 	idxMu    sync.Mutex
 	idxFiles map[string]*os.File
@@ -126,6 +135,7 @@ func newSink(cfg config, counters *captureCounters) (*sink, error) {
 		cfg:      cfg,
 		counters: counters,
 		queue:    make(chan *record, cfg.QueueCap),
+		done:     make(chan struct{}),
 		idxFiles: make(map[string]*os.File),
 		packs:    make(map[string]*packSeg),
 		packSeq:  make(map[string]int),
@@ -135,20 +145,35 @@ func newSink(cfg config, counters *captureCounters) (*sink, error) {
 		s.workers.Add(1)
 		go func() {
 			defer s.workers.Done()
-			for rec := range s.queue {
-				s.flush(rec)
+			for {
+				select {
+				case rec := <-s.queue:
+					s.flush(rec)
+				case <-s.done:
+					// 已停机：非阻塞排空队列残余后退出
+					for {
+						select {
+						case rec := <-s.queue:
+							s.flush(rec)
+						default:
+							return
+						}
+					}
+				}
 			}
 		}()
 	}
 	return s, nil
 }
 
-// closeAndWait 关闭队列并等待 worker 排空（优雅停机）：队内记录全部落盘后才返回。
-// 队列容量 × 预算给定驻留上界，排空是秒级；进程被 SIGKILL 时队内记录全损，
-// 无索引行、无 blob，与"崩溃丢流中记录"同级可见性。幂等，可重复调用；
-// 排空后顺带关闭日索引句柄（干净停机释放 fd）。
+// closeAndWait 进入停机并等待 worker 排空：先置 closed（在途 finish 改走 dropped，
+// 队列从此不再有新发送），再发 worker 退出信号并等待队列残余全部落盘。
+// 幂等，可重复调用；排空后顺带关闭日索引句柄与段文件（干净停机释放 fd）。
 func (s *sink) closeAndWait() {
-	s.closeOnce.Do(func() { close(s.queue) })
+	s.stopOnce.Do(func() {
+		s.closed.Store(true)
+		close(s.done)
+	})
 	s.workers.Wait()
 	s.idxMu.Lock()
 	for name, f := range s.idxFiles {
@@ -327,6 +352,14 @@ func (r *record) finish(errMsg string) {
 		r.trunc |= truncClientAbort
 	}
 	r.ms = time.Since(r.start).Milliseconds()
+	// 停机窗口（closed 已置位）：不再入队，按队满丢弃语义处理——
+	// 此时队列可能正被 worker 排空，向其发送虽不 panic（队列不 close），
+	// 但 stop 后台已不再保证落盘时序，统一计入 dropped
+	if r.sink.closed.Load() {
+		r.sink.counters.dropped.Add(1)
+		r.release()
+		return
+	}
 	select {
 	case r.sink.queue <- r:
 	default:

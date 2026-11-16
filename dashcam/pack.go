@@ -81,6 +81,15 @@ func (s *sink) appendPack(rec *record, dir, day string) (string, int64, int64, b
 		flags |= packFlagResTrunc
 	}
 
+	// 防御断言：段头长度字段是 uint32，负载 ≥ 4 GiB 会回绕致"声明长度 ≠ 实际"，
+	// 该段及其后偏移全部不可读。loadConfig 已把 MAX_*_BYTES 压到 1 GiB，此处双保险。
+	if int64(len(reqPayload)) >= 1<<32 || int64(len(resPayload)) >= 1<<32 {
+		logEvent("warn", "pack_payload_overflow", map[string]any{
+			"fp": rec.token, "req": len(reqPayload), "res": len(resPayload),
+		})
+		return "", 0, 0, false, false, false
+	}
+
 	header := make([]byte, 0, packHeaderLen)
 	header = append(header, packMagic...)
 	header = binary.LittleEndian.AppendUint32(header, uint32(len(reqPayload)))
