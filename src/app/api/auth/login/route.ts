@@ -2,7 +2,7 @@
 import { z } from "zod";
 
 import { createRateLimiter } from "@/lib/rate-limit";
-import { isSameOrigin } from "@/server/request-origin";
+import { clientIp, isSameOrigin } from "@/server/request-origin";
 import {
   createSessionToken,
   isSecureRequest,
@@ -41,10 +41,11 @@ export async function POST(request: Request): Promise<Response> {
     return json(403, "invalid_origin", "请求来源不被允许");
   }
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const ip = clientIp(request);
   const limit = loginLimiter.check(ip);
   if (!limit.allowed) {
-    const retryAfter = Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000));
+    // resetAt 与限流器同时间线（performance.now 单调时钟），不做时钟回拨换算
+    const retryAfter = Math.max(1, Math.ceil((limit.resetAt - performance.now()) / 1000));
     return json(429, "too_many_attempts", "尝试过于频繁，请稍后再试", {
       "retry-after": String(retryAfter),
     });

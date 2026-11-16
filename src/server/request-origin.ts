@@ -39,3 +39,18 @@ export function isSameOrigin(request: Request, origin: string): boolean {
     return false;
   }
 }
+
+/**
+ * 客户端 IP（限流键等场景）。
+ *
+ * 口径：优先取 `X-Real-IP`——nginx 参考配置（docs/nginx.example.conf）将其固定为
+ * `$remote_addr`，客户端无法伪造；仅当缺失时回落 `X-Forwarded-For` 首段（追加模式下
+ * 该段可被客户端伪造，只作无 X-Real-IP 部署的兜底）；两者都缺失返回 `unknown`
+ * （本地直连，限流退化为进程内全局桶）。
+ * 前提：应用只应暴露给可信反代（见 SECURITY.md），否则任何转发头都可被直连方伪造。
+ */
+export function clientIp(request: Request): string {
+  const real = request.headers.get("x-real-ip")?.trim();
+  if (real !== undefined && real !== "") return real;
+  return firstValue(request.headers.get("x-forwarded-for")) ?? "unknown";
+}

@@ -10,14 +10,14 @@
 import { connection } from "next/server";
 
 import { cacheKey } from "@/server/cache";
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
+import { ok } from "@/server/http";
 import {
-  QueryValidationError,
-  SCOPE_TTL_MS,
   cachedQuery,
+  handleQueryError,
   metaFromParams,
   normalizeQueryParams,
+  QueryValidationError,
+  SCOPE_TTL_MS,
 } from "@/server/queries/common";
 import {
   MODEL_RANKING_MAX_LIMIT,
@@ -36,7 +36,8 @@ export async function GET(request: Request): Promise<Response> {
       ]);
     }
 
-    const key = `${cacheKey("modelDist", { start: params.start, end: params.end })}:cross`;
+    // limit 决定 Top 用户集合，必须进 key（与 models/ranking、stats.service 口径一致）
+    const key = `${cacheKey("modelDist", { start: params.start, end: params.end })}:cross:limit=${params.limit}`;
     const { data, cached } = await cachedQuery(key, SCOPE_TTL_MS.modelDist, () =>
       runModelCrossQuery({ start: params.start, end: params.end }, params.limit),
     );
@@ -46,9 +47,6 @@ export async function GET(request: Request): Promise<Response> {
       source: MODEL_SOURCE,
     });
   } catch (error) {
-    if (error instanceof QueryValidationError) return invalidQuery(error.issues);
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[models/cross] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("models/cross", error);
   }
 }

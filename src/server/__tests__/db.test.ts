@@ -24,6 +24,7 @@ import {
   getDb,
   getKysely,
   redactCredentials,
+  redactNetworkEndpoints,
   resolveDbConnectionConfig,
   type DbConnectionConfig,
   type ReadOnlyDatabase,
@@ -241,6 +242,19 @@ describe("checkDbHealth：探活降级", () => {
       ),
     ).toBe("connect ECONNREFUSED postgres://***:***@db-host:5432/new_api");
     expect(redactCredentials("no credentials here")).toBe("no credentials here");
+  });
+
+  it("对外健康错误抹除内网端点（免鉴权端点不泄漏拓扑）", () => {
+    expect(redactNetworkEndpoints("connect ECONNREFUSED 10.0.0.5:5432")).toBe(
+      "connect ECONNREFUSED ***",
+    );
+    expect(redactNetworkEndpoints("getaddrinfo ENOTFOUND db.internal.example.com")).toBe(
+      "getaddrinfo ENOTFOUND ***",
+    );
+    expect(redactNetworkEndpoints("connect ECONNREFUSED localhost:5432")).toBe(
+      "connect ECONNREFUSED ***",
+    );
+    expect(redactNetworkEndpoints("timeout after 5000ms")).toBe("timeout after 5000ms");
   });
 });
 

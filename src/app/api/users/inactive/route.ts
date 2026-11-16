@@ -10,9 +10,8 @@
  */
 import { connection } from "next/server";
 
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
-import { QueryValidationError, metaFromParams } from "@/server/queries/common";
+import { ok } from "@/server/http";
+import { handleQueryError, metaFromParams } from "@/server/queries/common";
 import {
   INACTIVE_SOURCE,
   getInactiveUsers,
@@ -27,11 +26,6 @@ export async function GET(request: Request): Promise<Response> {
     const { data, cached } = await getInactiveUsers(params);
     return ok(data, { ...metaFromParams(params, cached), source: INACTIVE_SOURCE });
   } catch (error) {
-    if (error instanceof QueryValidationError) {
-      return invalidQuery(error.issues);
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[users/inactive] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("users/inactive", error);
   }
 }

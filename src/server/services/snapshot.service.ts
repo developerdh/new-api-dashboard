@@ -36,7 +36,7 @@ export interface SnapshotResult {
 
 export type SnapshotRenderer = (url: string) => Promise<string>;
 
-/** 参数非法（400）。 */
+/** 在途任务达到并发上限（429 snapshot_busy）。 */
 export class SnapshotBusyError extends Error {
   readonly code = "snapshot_busy";
   constructor() {
@@ -126,7 +126,10 @@ export function snapshotFilename(name: string, now: Date = new Date()): string {
 
   const safeName = name
     .replace(/[^\w.-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    // 写侧收敛到读侧白名单（isSnapshotFilename）：禁止内部 `..`、首字符必须为字母数字，
+    // 否则会产生「创建成功但永远 400 不可访问」的快照
+    .replace(/\.{2,}/g, ".")
+    .replace(/^[-.]+|[-.]+$/g, "")
     .slice(0, MAX_NAME_LENGTH);
   return `${safeName || "snapshot"}-${stamp}.html`;
 }
@@ -189,16 +192,15 @@ interface PlaywrightModule {
 }
 
 /**
- * 可选依赖加载：用 Function 构造动态 import，避免打包器在构建期解析缺失的 `playwright`。
+ * 可选依赖加载：动态 import + 打包器忽略注释，避免构建期解析缺失的 `playwright`
+ * （turbopackIgnore / webpackIgnore 双注释，兼容两种打包器）。
  * 未安装时抛 SnapshotUnavailableError（503），不影响应用构建与其余功能。
  */
 async function loadPlaywright(): Promise<PlaywrightModule> {
-  const dynamicImport = new Function("specifier", "return import(specifier)") as (
-    specifier: string,
-  ) => Promise<unknown>;
-
   try {
-    return (await dynamicImport("playwright")) as PlaywrightModule;
+    return (await import(
+      /* turbopackIgnore: true */ /* webpackIgnore: true */ "playwright"
+    )) as PlaywrightModule;
   } catch {
     throw new SnapshotUnavailableError();
   }

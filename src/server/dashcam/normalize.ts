@@ -569,7 +569,9 @@ function parseJsonResponse(protocol: DashcamProtocol, value: unknown): ResponseP
 
   const collector = createCollector();
 
-  if (protocol === "openai-chat" || protocol === "unknown") {
+  // openai-chat 走 message 形态；openai-completions 走下方 choices[0].text legacy 回退；
+  // unknown 按两种形态依次试探
+  if (protocol === "openai-chat" || protocol === "openai-completions" || protocol === "unknown") {
     const choice = asRecord(asArray(record.choices)[0]);
     const message = asRecord(choice?.message);
     if (message !== undefined) {

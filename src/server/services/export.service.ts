@@ -85,8 +85,21 @@ const EXPORT_HEADERS: Record<ExportDataset, readonly string[]> = {
 /** 是否需要在 CSV 中转义（含引号/逗号/换行）。 */
 const CSV_QUOTE_PATTERN = /[",\r\n]/;
 
+/** 纯数字（含负数/小数/科学计数）：保持原样，避免负数被公式防护破坏。 */
+const CSV_NUMBER_PATTERN = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
+
+/**
+ * 公式注入防护（OWASP CSV Injection）：Excel/WPS 会把以 `=`、`+`、`-`、`@`、Tab 开头
+ * 的单元格当公式/宏执行（如 `=HYPERLINK(...)`、DDE）。命中且不是纯数字时前置 `'`
+ * 使其按文本处理。
+ */
+const CSV_FORMULA_PATTERN = /^[=+\-@\t]/;
+
 export function escapeCsvField(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
+  let text = value === null || value === undefined ? "" : String(value);
+  if (CSV_FORMULA_PATTERN.test(text) && !CSV_NUMBER_PATTERN.test(text)) {
+    text = `'${text}`;
+  }
   if (!CSV_QUOTE_PATTERN.test(text)) return text;
   return `"${text.replaceAll('"', '""')}"`;
 }

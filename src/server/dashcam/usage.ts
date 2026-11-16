@@ -12,7 +12,7 @@ import { getCache } from "@/server/cache";
 import { dashcamCacheTtlMs } from "./index";
 import { extractUsage } from "./normalize";
 import { readDashcamBlob } from "./reader";
-import type { DashcamUsage } from "./types";
+import type { DashcamSegRef, DashcamUsage } from "./types";
 
 /** 单次 API 请求最多水合的正文数。 */
 const DEFAULT_USAGE_HYDRATE_MAX = 100;
@@ -41,6 +41,8 @@ export interface UsageSource {
   path: string;
   responseTruncated: boolean;
   gzip: { request: boolean; response: boolean };
+  /** 段式定位（D-P5）；缺省 = 旧布局，读 `<trace>.res[.gz]`。 */
+  seg?: DashcamSegRef;
 }
 
 /** 水合结果的 map 键：与 blob 寻址（日期 + 指纹 + trace）一致。 */
@@ -71,6 +73,7 @@ export async function readSessionUsage(
       trace: row.traceId,
       kind: "res",
       gzip: row.gzip.response,
+      ...(row.seg === undefined ? {} : { seg: row.seg }),
     });
     usage = extractUsage({
       path: row.path,

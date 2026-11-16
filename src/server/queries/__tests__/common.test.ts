@@ -20,6 +20,7 @@ import {
   DEFAULT_LIMIT,
   MAX_EPOCH_SECONDS,
   MODEL_NAME_PATTERN,
+  QUERY_MAX_RANGE_SECONDS,
   QueryValidationError,
   SCOPE_TTL_MS,
   addShanghaiDays,
@@ -122,6 +123,16 @@ describe("normalizeQueryParams：归一化与校验", () => {
     expect(() =>
       normalizeQueryParams({ start: MAX_EPOCH_SECONDS + 1, end: MAX_EPOCH_SECONDS + 2 }),
     ).toThrow(QueryValidationError);
+  });
+
+  it("区间宽度超过 366 天被拒（防全表聚合）", () => {
+    expect(() =>
+      normalizeQueryParams({ start: T_DAY, end: T_DAY + QUERY_MAX_RANGE_SECONDS + 1 }),
+    ).toThrow(QueryValidationError);
+    // 边界值（恰好 366 天）放行
+    expect(
+      normalizeQueryParams({ start: T_DAY, end: T_DAY + QUERY_MAX_RANGE_SECONDS }).start,
+    ).toBe(T_DAY);
   });
 
   it("非法参数抛 QueryValidationError，issues 带字段路径", () => {

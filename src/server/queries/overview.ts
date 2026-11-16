@@ -15,6 +15,7 @@ import { getDb, type ReadOnlyDatabase } from "@/server/db";
 import {
   EXCLUDE_STAT_USERS_SQL,
   LOG_TYPE_CONSUME,
+  toInteger,
   type QueryRange,
 } from "@/server/queries/common";
 
@@ -72,12 +73,6 @@ export function buildRequestCountQuery(db: ReadOnlyDatabase, range: QueryRange) 
     .where("type", "=", LOG_TYPE_CONSUME)
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end);
-}
-
-/** 空结果/异常值兜底：整数化，非有限值记 0（空区间必须返回全 0，不能返回 null）。 */
-function toInteger(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 /** 聚合行 → 响应体（拆出来便于无库单测「空区间全 0」）。 */

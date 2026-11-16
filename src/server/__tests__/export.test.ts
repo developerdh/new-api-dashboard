@@ -111,6 +111,23 @@ describe("CSV 转义与流式输出", () => {
     expect(escapeCsvField(42)).toBe("42");
   });
 
+  it("公式注入防护：= + - @ Tab 开头且非纯数字时前置单引号", () => {
+    // 含引号的注入样例：前置 ' 后仍参与引号转义
+    expect(escapeCsvField('=HYPERLINK("http://evil","x")')).toBe(
+      '"\'=HYPERLINK(""http://evil"",""x"")"',
+    );
+    expect(escapeCsvField("+cmd|'/c calc'!A1")).toBe("'+cmd|'/c calc'!A1");
+    expect(escapeCsvField("@SUM(1)")).toBe("'@SUM(1)");
+    expect(escapeCsvField("-not-a-number")).toBe("'-not-a-number");
+    expect(escapeCsvField("\tinline-tab")).toBe("'\tinline-tab");
+    // 纯数字负数/小数/科学计数保持原样
+    expect(escapeCsvField(-123)).toBe("-123");
+    expect(escapeCsvField("-12.5")).toBe("-12.5");
+    expect(escapeCsvField("1e-5")).toBe("1e-5");
+    // 前置引号后仍参与引号转义（含逗号场景）
+    expect(escapeCsvField("=a,b")).toBe('"\'=a,b"');
+  });
+
   it("行拼接使用逗号，含逗号字段被引号包裹", () => {
     expect(toCsvLine([7, "a,b", 100])).toBe('7,"a,b",100');
   });

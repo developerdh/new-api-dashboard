@@ -94,6 +94,16 @@ export interface DashcamUsage {
   cacheWriteTokens?: number;
 }
 
+/** 段式打包定位（D-P5）：索引 seg/off/ln 的读取方视角；缺失 = 旧的两文件布局。 */
+export interface DashcamSegRef {
+  /** 段文件名（`seg-<HH>-<seq>.pack`） */
+  name: string;
+  /** 段内记录起始偏移（指向 14B 二进制头） */
+  off: number;
+  /** 段内整条记录字节数 */
+  ln?: number;
+}
+
 /** 列表行（API 响应与界面共用）。 */
 export interface DashcamSessionRow {
   traceId: string;
@@ -127,6 +137,8 @@ export interface DashcamSessionRow {
   sessionKey?: string;
   /** 该请求的 token 用量（正文可读且解析成功时由服务端水合） */
   usage?: DashcamUsage;
+  /** 段式定位（usage 水合兜底读正文用；索引 seg/off/ln，旧布局行缺省） */
+  seg?: DashcamSegRef;
 }
 
 /** 会话级聚合行（`group=session` 时返回）。 */
@@ -177,6 +189,8 @@ export interface DashcamThreadTurn {
   gzip: { request: boolean; response: boolean };
   /** 该轮的 token 用量（线程接口按预算水合最近若干轮，其余轮缺省） */
   usage?: DashcamUsage;
+  /** 段式定位（usage 水合兜底读正文用；索引 seg/off/ln，旧布局行缺省） */
+  seg?: DashcamSegRef;
   /** 上一轮的定位信息（详情接口算增量用），首轮为 null。 */
   prev: { traceId: string; date: string } | null;
 }

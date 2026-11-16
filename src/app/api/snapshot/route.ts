@@ -11,9 +11,8 @@ import { connection } from "next/server";
 import { z } from "zod";
 
 import { requireAdmin } from "@/server/admin-auth";
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, queryFailed, toQueryIssues } from "@/server/http";
-import { QueryValidationError } from "@/server/queries/common";
+import { invalidQuery, toQueryIssues } from "@/server/http";
+import { handleQueryError, QueryValidationError } from "@/server/queries/common";
 import {
   SnapshotBusyError,
   SnapshotUnavailableError,
@@ -62,8 +61,6 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[snapshot] failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("snapshot", error);
   }
 }

@@ -132,16 +132,19 @@ export async function GET(
     }
 
     const day = await readIndexDay(dir, query.date);
+    // 归属过滤先行：越权请求与「不存在」同响应（404）。若先判 ambiguous 再验归属，
+    // 越权者可借 409 探知「某日存在同名 trace（且 ≥2 条）」，违背 §7.1 收敛原则。
     const matched = day.entries.filter(
-      (entry) => entry.t === trace && (query.fp === undefined || entry.u === query.fp),
+      (entry) =>
+        entry.t === trace &&
+        fingerprints.has(entry.u) &&
+        (query.fp === undefined || entry.u === query.fp),
     );
     if (matched.length === 0) return toDashcamErrorResponse(new DashcamBlobMissingError());
     if (matched.length > 1) throw new DashcamAmbiguousError();
 
     const entry = matched[0];
-    if (entry === undefined || !fingerprints.has(entry.u)) {
-      return toDashcamErrorResponse(new DashcamBlobMissingError());
-    }
+    if (entry === undefined) return toDashcamErrorResponse(new DashcamBlobMissingError());
 
     const [requestBlob, responseBlob] = await Promise.all([
       readDashcamBlob({

@@ -18,8 +18,10 @@ import { getDb, type ReadOnlyDatabase } from "@/server/db";
 import {
   EXCLUDE_STAT_USERS_SQL,
   LOG_TYPE_CONSUME,
+  toInteger,
   type QueryRange,
 } from "@/server/queries/common";
+import { loadUserIdentities, type UserIdentity } from "@/server/queries/user-directory";
 
 /** 清单缺省 / 上限条数（上限与 `common.ts` 的 MAX_LIMIT 对齐）。 */
 export const INACTIVE_DEFAULT_LIMIT = 100;
@@ -38,13 +40,6 @@ export interface PrevActiveRow {
 /** 本期活跃集合行（DISTINCT user_id）。 */
 export interface CurrentActiveRow {
   user_id: number;
-}
-
-/** users 表名称行（含昵称）。 */
-export interface InactiveNameRow {
-  id: number;
-  username: string | null;
-  display_name: string | null;
 }
 
 /** 差集候选（尚未附带用户名）。 */
@@ -70,11 +65,6 @@ export interface InactiveUsersSnapshot {
   total: number;
   /** rows 是否被 limit 截断。 */
   truncated: boolean;
-}
-
-function toInteger(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 function clampLimit(limit: number): number {
@@ -121,14 +111,6 @@ export function buildCurrentActiveQuery(db: ReadOnlyDatabase, range: QueryRange)
     .where("user_id", "is not", null);
 }
 
-/** 差集结果的账号 + 昵称补齐（仅对最终入选的 user_id 查 users，控制 IN 列表长度）。 */
-export function buildInactiveNamesQuery(db: ReadOnlyDatabase, userIds: number[]) {
-  return db
-    .selectFrom("users")
-    .select(["id", "username", "display_name"])
-    .where("id", "in", userIds);
-}
-
 export interface InactiveSelection {
   rows: InactiveCandidateRow[];
   prevActiveUsers: number;
@@ -163,26 +145,7 @@ export function selectInactiveCandidates(
   };
 }
 
-/** 附带账号与昵称；users 表缺失/字段为 NULL 时留空串，由前端兜底显示。 */
-export function attachInactiveNames(
-  candidates: InactiveCandidateRow[],
-  nameRows: InactiveNameRow[],
-): InactiveUserRow[] {
-  const names = new Map<number, { username: string; displayName: string }>();
-  for (const row of nameRows) {
-    names.set(toInteger(row.id), {
-      username: (row.username ?? "").trim(),
-      displayName: (row.display_name ?? "").trim(),
-    });
-  }
-  return candidates.map((row) => ({
-    ...row,
-    username: names.get(row.userId)?.username ?? "",
-    displayName: names.get(row.userId)?.displayName ?? "",
-  }));
-}
-
-/** 执行三层查询：上期聚合 + 本期集合并发，最后按差集结果补用户名。 */
+/** 执行三层查询：上期聚合 + 本期集合并发，最后按差集结果补用户名（复用 user-directory）。 */
 export async function runInactiveUsersQuery(
   range: QueryRange,
   limit: number,
@@ -195,16 +158,20 @@ export async function runInactiveUsersQuery(
   ]);
 
   const selection = selectInactiveCandidates(prevRows, currentRows, limit);
-  const nameRows =
+  const identities: Map<number, UserIdentity> =
     selection.rows.length === 0
-      ? []
-      : ((await buildInactiveNamesQuery(
-          db,
+      ? new Map()
+      : await loadUserIdentities(
           selection.rows.map((row) => row.userId),
-        ).execute()) as InactiveNameRow[]);
+          db,
+        );
 
   return {
-    rows: attachInactiveNames(selection.rows, nameRows),
+    rows: selection.rows.map((row) => ({
+      ...row,
+      username: identities.get(row.userId)?.username ?? "",
+      displayName: identities.get(row.userId)?.displayName ?? "",
+    })),
     prevRange,
     prevActiveUsers: selection.prevActiveUsers,
     total: selection.total,

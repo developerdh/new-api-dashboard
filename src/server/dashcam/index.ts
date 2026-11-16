@@ -26,6 +26,7 @@ import {
 import type {
   DashcamConversationRow,
   DashcamIndexEntry,
+  DashcamSegRef,
   DashcamSessionRow,
   DashcamThreadTurn,
   DashcamUsage,
@@ -146,9 +147,11 @@ export function parseIndexLine(line: string): DashcamIndexEntry | null {
   if (startedAt === "" || Number.isNaN(Date.parse(startedAt))) return null;
 
   // 段式打包（D-P5）：seg 名合法才走段路径；off 缺省 0（段内首条被采集端 omitempty 略去）。
-  // seg 缺失 / 名字非法 → 按旧的两文件布局回退。
+  // seg 缺失 / 名字非法 → 按旧的两文件布局回退；off 存在但非法同样回退——
+  // 否则会从段首读到段内第一条（别人的）记录，在错误 trace 名下展示串台内容。
   const seg = toText(record.seg);
-  const packed = PACK_SEG_PATTERN.test(seg);
+  const off = optionalNonNegativeInt(record.off);
+  const packed = PACK_SEG_PATTERN.test(seg) && (record.off === undefined || off !== undefined);
 
   return {
     t: trace,
@@ -172,7 +175,7 @@ export function parseIndexLine(line: string): DashcamIndexEntry | null {
     ...(optionalPositiveInt(record.ct) === undefined ? {} : { ct: optionalPositiveInt(record.ct) }),
     ...(optionalPositiveInt(record.cc) === undefined ? {} : { cc: optionalPositiveInt(record.cc) }),
     ...(optionalPositiveInt(record.cw) === undefined ? {} : { cw: optionalPositiveInt(record.cw) }),
-    ...(packed ? { seg, off: optionalNonNegativeInt(record.off) ?? 0 } : {}),
+    ...(packed ? { seg, off: off ?? 0 } : {}),
     ...(packed && optionalNonNegativeInt(record.ln) !== undefined
       ? { ln: optionalNonNegativeInt(record.ln) }
       : {}),
@@ -316,9 +319,20 @@ export function toSessionRow(entry: DashcamIndexEntry, date: string): DashcamSes
     clientAborted: (entry.tr & 4) === 4,
     gzip: { request: entry.qz, response: entry.rz },
     ...(usageOfIndexEntry(entry) === undefined ? {} : { usage: usageOfIndexEntry(entry) }),
+    ...(segRefOf(entry) === undefined ? {} : { seg: segRefOf(entry) }),
     ...(entry.e === undefined ? {} : { error: entry.e }),
     ...(entry.ip === undefined ? {} : { ip: entry.ip }),
     ...(entry.k === undefined ? {} : { sessionKey: entry.k }),
+  };
+}
+
+/** 索引 → 段定位（usage 水合兜底读正文用）；旧布局行（无 seg）返回 undefined。 */
+function segRefOf(entry: DashcamIndexEntry): DashcamSegRef | undefined {
+  if (entry.seg === undefined) return undefined;
+  return {
+    name: entry.seg,
+    off: entry.off ?? 0,
+    ...(entry.ln === undefined ? {} : { ln: entry.ln }),
   };
 }
 
@@ -616,6 +630,7 @@ export async function scanThread(input: ThreadScanInput): Promise<ThreadScanResu
       clientAborted: (entry.tr & 4) === 4,
       gzip: { request: entry.qz, response: entry.rz },
       ...(usageOfIndexEntry(entry) === undefined ? {} : { usage: usageOfIndexEntry(entry) }),
+      ...(segRefOf(entry) === undefined ? {} : { seg: segRefOf(entry) }),
       prev: previous === undefined ? null : { traceId: previous.entry.t, date: previous.date },
     };
   });

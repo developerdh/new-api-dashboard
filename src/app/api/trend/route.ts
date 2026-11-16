@@ -10,9 +10,8 @@
  */
 import { connection } from "next/server";
 
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
-import { QueryValidationError, metaFromParams } from "@/server/queries/common";
+import { ok } from "@/server/http";
+import { handleQueryError, metaFromParams } from "@/server/queries/common";
 import { TREND_SOURCE, getTrend, resolveTrendParams } from "@/server/services/stats.service";
 
 export async function GET(request: Request): Promise<Response> {
@@ -23,11 +22,6 @@ export async function GET(request: Request): Promise<Response> {
     const { data, cached } = await getTrend(resolved);
     return ok(data, { ...metaFromParams(resolved.params, cached), source: TREND_SOURCE });
   } catch (error) {
-    if (error instanceof QueryValidationError) {
-      return invalidQuery(error.issues);
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[trend] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("trend", error);
   }
 }

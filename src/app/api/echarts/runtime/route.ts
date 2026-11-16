@@ -18,7 +18,12 @@ function runtimePath(): string {
 }
 
 function loadRuntime(): Promise<string> {
-  runtimePromise ??= readFile(runtimePath(), "utf8");
+  // 只缓存成功结果：失败（文件瞬时缺失/EMFILE 等）不驻留 Promise，
+  // 否则首次失败后所有请求永远 500，文件恢复也不会重试
+  runtimePromise ??= readFile(runtimePath(), "utf8").catch((error) => {
+    runtimePromise = undefined;
+    throw error;
+  });
   return runtimePromise;
 }
 

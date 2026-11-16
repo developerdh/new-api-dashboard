@@ -16,6 +16,8 @@ describe("REQUIRED_COLUMNS", () => {
   it("包含统计口径依赖的关键列", () => {
     expect(REQUIRED_COLUMNS.users).toContain("display_name");
     expect(REQUIRED_COLUMNS.logs).toContain("type");
+    // logs.other 承载缓存 token 拆分（queries/user.ts 的 LOGS_OTHER_JSONB 裸引用该列）
+    expect(REQUIRED_COLUMNS.logs).toContain("other");
     expect(REQUIRED_COLUMNS.quota_data).toContain("token_used");
   });
 });

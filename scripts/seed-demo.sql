@@ -17,8 +17,8 @@
 --
 -- 生成内容（确定性、可重跑）：
 --   users      12 行（1 个禁用账号用于验证状态过滤，1 个无昵称用于验证账号回落）
---   quota_data 近 30 天 · 小时桶 · 11 个启用用户 · 每用户每小时 2 个模型 ≈ 1.3 万行
---   logs       由 quota_data 拆分出的请求级记录 ≈ 3 万行
+--   quota_data 近 60 天 · 小时桶 · 11 个启用用户 · 每用户每小时 2 个模型 ≈ 2.4 万行
+--   logs       由 quota_data 拆分出的请求级记录 ≈ 5 万+ 行（约 1/3 行带 other 缓存字段样例）
 -- 全部重跑即重建，不保留旧数据。
 -- ============================================================================
 
@@ -74,7 +74,9 @@ CREATE TABLE logs (
   model_name        text    NOT NULL,
   quota             bigint  NOT NULL DEFAULT 0,
   prompt_tokens     bigint  NOT NULL DEFAULT 0,
-  completion_tokens bigint  NOT NULL DEFAULT 0
+  completion_tokens bigint  NOT NULL DEFAULT 0,
+  -- 缓存 token 与语义标记的载体列（db-schema-notes §3.7）；看板 Token 构成卡裸引用该列
+  other             text
 );
 
 -- 索引与方案 §2.4 同名（demo 库可同步建；真实库建索引走 scripts/index-suggestions.sql）
@@ -171,9 +173,11 @@ CROSS JOIN LATERAL (
 -- ---------------------------------------------------------------------------
 -- logs：把每个小时桶拆成 2–3 条请求级记录（同一小时内偏移，便于 RPM/请求数口径）
 --   注意：logs 基线无 token_used 列（方案 §2.2），Token 由 prompt+completion 求和。
+--   约 1/3 行造 other 缓存字段样例（anthropic 语义），供 Token 构成卡联调；
+--   demo 数值不追求真实占比，仅保证字段形态正确（JSON 对象文本，可被 ::jsonb 解析）。
 -- ---------------------------------------------------------------------------
 INSERT INTO logs (
-  user_id, username, created_at, model_name, quota, prompt_tokens, completion_tokens
+  user_id, username, created_at, model_name, quota, prompt_tokens, completion_tokens, other
 )
 SELECT
   q.user_id,
@@ -182,7 +186,16 @@ SELECT
   q.model_name,
   q.quota / 3,
   q.prompt_tokens / 3,
-  q.completion_tokens / 3
+  q.completion_tokens / 3,
+  CASE
+    WHEN (q.user_id + r.n) % 3 = 0 THEN
+      jsonb_build_object(
+        'cache_tokens', greatest(round((q.prompt_tokens / 3) * 0.5)::bigint, 0),
+        'cache_creation_tokens', greatest(round((q.prompt_tokens / 3) * 0.1)::bigint, 0),
+        'usage_semantic', 'anthropic'
+      )::text
+    ELSE NULL
+  END
 FROM quota_data q
 CROSS JOIN generate_series(0, 2) AS r(n)
 WHERE (q.user_id + r.n) % 4 <> 0;

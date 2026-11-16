@@ -1,14 +1,15 @@
 /**
- * 沉默用户服务：参数解析（含区间上限）+ 缓存编排；SQL 与集合差集在 `queries/inactive.ts`。
+ * 沉默用户服务：参数解析 + 缓存编排；SQL 与集合差集在 `queries/inactive.ts`。
  *
  * 与排行服务同构：复用 `usersRanking` 缓存档（TTL 120s），key 追加 `:inactive:limit=N` 段避免与排行冲突。
  * 上期区间由 `start/end` 确定性推导，因此无需进 key。
+ * 区间宽度上限由公共 schema 统一执行（`QUERY_MAX_RANGE_SECONDS` = 366 天，
+ * 与本功能旧有的 366 天上限同值，此处不再重复校验）。
  */
 import { cacheKey } from "@/server/cache";
 import {
   INACTIVE_DEFAULT_LIMIT,
   INACTIVE_MAX_LIMIT,
-  INACTIVE_MAX_RANGE_SECONDS,
   runInactiveUsersQuery,
   type InactiveUsersSnapshot,
 } from "@/server/queries/inactive";
@@ -28,9 +29,8 @@ export const INACTIVE_CACHE_SCOPE = "usersRanking" as const;
 
 /**
  * 解析参数：
- * - `start`/`end` 必填（ISO 或 Unix 秒），复用公共 schema；
- * - `limit` 缺省 100（不是公共件的 20），上限 500；
- * - 本期区间上限 366 天：上期要回溯等长窗口，避免大范围扫描撞 30s statement_timeout。
+ * - `start`/`end` 必填（ISO 或 Unix 秒），复用公共 schema（含 366 天区间上限）；
+ * - `limit` 缺省 100（不是公共件的 20），上限 500。
  */
 export function resolveInactiveParams(searchParams: URLSearchParams): QueryParams {
   const params = normalizeQueryParams(searchParams);
@@ -39,14 +39,6 @@ export function resolveInactiveParams(searchParams: URLSearchParams): QueryParam
   if (limit > INACTIVE_MAX_LIMIT) {
     throw new QueryValidationError([
       { path: "limit", message: `沉默用户 limit 上限 ${INACTIVE_MAX_LIMIT}` },
-    ]);
-  }
-  if (params.end - params.start > INACTIVE_MAX_RANGE_SECONDS) {
-    throw new QueryValidationError([
-      {
-        path: "range",
-        message: `沉默用户统计区间上限 ${INACTIVE_MAX_RANGE_SECONDS / 86_400} 天`,
-      },
     ]);
   }
 

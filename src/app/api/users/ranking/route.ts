@@ -9,9 +9,8 @@
  */
 import { connection } from "next/server";
 
-import { redactCredentials } from "@/server/db";
-import { invalidQuery, ok, queryFailed } from "@/server/http";
-import { QueryValidationError, metaFromParams } from "@/server/queries/common";
+import { ok } from "@/server/http";
+import { handleQueryError, metaFromParams } from "@/server/queries/common";
 import {
   RANKING_SOURCE,
   getUserRanking,
@@ -26,11 +25,6 @@ export async function GET(request: Request): Promise<Response> {
     const { data, cached } = await getUserRanking(params);
     return ok(data, { ...metaFromParams(params, cached), source: RANKING_SOURCE });
   } catch (error) {
-    if (error instanceof QueryValidationError) {
-      return invalidQuery(error.issues);
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[users/ranking] query failed", redactCredentials(message));
-    return queryFailed();
+    return handleQueryError("users/ranking", error);
   }
 }

@@ -117,12 +117,21 @@ describe("单用户 SQL 编译口径", () => {
     expect(compiled.sql).toContain('as "cache_outside_prompt_tokens"');
     // 缓存口径：jsonb 兜底守卫（防非 JSON 脏值）+ anthropic 语义修正（db-schema-notes §3.7）
     expect(compiled.sql).toContain("btrim(other) LIKE '{%'");
-    expect(compiled.sql).toContain("->> 'cache_tokens'");
-    expect(compiled.sql).toContain("->> 'cache_creation_tokens'");
+    // 数值键经参数化提取 + 整数守卫正则（防 other 内非数字文本使聚合 500）
+    expect(compiled.sql).toContain("->> $1");
+    expect(compiled.sql).toContain("->> $3");
+    expect(compiled.sql).toContain("^-?[0-9]+(.[0-9]+)?$");
+    expect(compiled.sql).toContain("::numeric)::bigint");
+    expect(compiled.parameters).toContain("cache_tokens");
+    expect(compiled.parameters).toContain("cache_creation_tokens");
     expect(compiled.sql).toContain("= 'anthropic'");
-    // 静态 SQL 片段不产生额外参数
-    expect(compiled.sql).toMatch(/"type" = \$1/);
-    expect(compiled.parameters).toEqual([2, USER_ID, T0, T1]);
+    // SELECT 内 jsonb 守卫的字段名参数随片段展开次数重复（read/write 各出现两次：
+    // 明细列 + cache_outside_prompt_tokens），WHERE 的 type/user_id/区间参数随后
+    expect(compiled.sql).toMatch(/"type" = \$\d+/);
+    const params = compiled.parameters as unknown[];
+    expect(params.filter((p) => p === "cache_tokens")).toHaveLength(4);
+    expect(params.filter((p) => p === "cache_creation_tokens")).toHaveLength(4);
+    expect(params.filter((p) => typeof p === "number")).toEqual([2, USER_ID, T0, T1]);
   });
 
   it("models：按 model_name 聚合，消耗降序 + model_name 兜底", () => {
@@ -367,16 +376,19 @@ describe("GET /api/users/[id]/trend", () => {
     expect(trendRunner).toHaveBeenCalledTimes(1);
   });
 
-  it("桶数超限 → 400（不触达执行层）；非法 granularity → 400", async () => {
-    const end = T0 + 1_001 * DAY;
-    const tooMany = await getUserTrend(
+  it("区间超 366 天共享上限 → 400（不触达执行层）；非法 granularity → 400", async () => {
+    // 桶数上限（1000）在 366 天共享区间上限生效后已不可经公共参数触达
+    // （day 桶 ≤366 个、hour 非合法粒度），保留为服务端纵深防御。
+    // 400 天 > 上限 → normalizeQueryParams 直接 400（path=end），执行层不被触达
+    const end = new Date((T0 + 400 * DAY) * 1000).toISOString().slice(0, 10);
+    const tooLong = await getUserTrend(
       new Request(url(`start=2026-11-10&end=${end}&granularity=day`)),
       ctx(),
     );
-    expect(tooMany.status).toBe(400);
+    expect(tooLong.status).toBe(400);
     expect(
-      ((await tooMany.json()) as { error: { issues?: Array<{ path: string }> } }).error.issues?.some(
-        (issue) => issue.path === "range",
+      ((await tooLong.json()) as { error: { issues?: Array<{ path: string }> } }).error.issues?.some(
+        (issue) => issue.path === "end",
       ),
     ).toBe(true);
 
