@@ -16,9 +16,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  # 同一 tag 的重跑串行执行（发布动作不 cancel，避免中断半完成的发布）
+  group: release-dashcam-${{ github.ref }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,14 +37,22 @@ jobs:
 
       - name: 解析版本
         id: v
+        # workflow_dispatch 输入经 env 中转再进脚本：直接内插 ${{ }} 会在解析前逃逸引号，
+        # 构成 run: 命令注入面（inputs 由有写权限的成员填写，仍按规范防御）
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VALUE="${{ github.event.inputs.version }}"
+          if [ -n "$VERSION_INPUT" ]; then
+            VALUE="$VERSION_INPUT"
           else
             VALUE="${GITHUB_REF_NAME#dashcam-}"
           fi
-          # 版本须以 v 开头，保证产物命名与 tag（dashcam-v*）口径一致
-          case "$VALUE" in v*) ;; *) echo "::error::版本号须以 v 开头，如 v0.1.0"; exit 1;; esac
+          # 版本须为 v+数字/点形态（如 v0.1.0、v0.1.0-beta.1），保证产物命名与
+          # tag（dashcam-v*）口径一致，同时防止畸形输入经 GITHUB_OUTPUT 传播到后续步骤
+          case "$VALUE" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::版本号须形如 v0.1.0（v + 数字/点）"; exit 1;;
+          esac
           echo "value=$VALUE" >> "$GITHUB_OUTPUT"
 
       # 发布说明取 tag 附注，而不是 GitHub 自动生成——自动生成的对比区间会在
@@ -94,7 +107,8 @@ jobs:
           file "$BIN" | tee /dev/stderr | grep -q "statically linked"
 
       - name: 发布 Release
-        uses: softprops/action-gh-release@v2
+        # 第三方 action 固定到 commit SHA（v2）防 tag 可变导致的供应链篡改
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # 手动触发时 ref_name 是分支名，不能直接当 tag；tag 推送时由版本反推的结果恰等于 ref_name
           tag_name: dashcam-${{ steps.v.outputs.value }}

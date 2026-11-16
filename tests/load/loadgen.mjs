@@ -123,7 +123,9 @@ async function fireOne(index) {
       errorCounts[`http_${response.status}`] = (errorCounts[`http_${response.status}`] ?? 0) + 1;
     }
   } catch (error) {
-    const key = error?.name === "AbortError" ? "client_timeout" : "network_error";
+    // abort(自定义 reason) 会让 fetch 以该 Error 本身 reject（name 是 "Error" 而非
+    // "AbortError"），按 message 识别客户端超时，否则超时全部计入 network_error
+    const key = error?.message === "request-timeout" ? "client_timeout" : "network_error";
     errorCounts[key] = (errorCounts[key] ?? 0) + 1;
     results.push({ ttfbMs, totalMs: performance.now() - started, status: 0 });
   } finally {

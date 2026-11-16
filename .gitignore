@@ -49,6 +49,8 @@ docs/tasks/
 dashcam/bin/
 dashcam/dist/
 dashcam/data/
+# 直接 go build 在 dashcam/ 根目录产出的同名二进制（Makefile image:/README go build）
+dashcam/new-api-dashcam
 data/dashcam/
 /data
 

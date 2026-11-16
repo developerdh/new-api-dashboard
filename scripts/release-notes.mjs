@@ -26,7 +26,9 @@ const outPath = path.resolve(
 /** 从 CHANGELOG 抽取 `## [version]` 起的段落（到下一个二级标题为止）。 */
 function extractChangelog(changelog, target) {
   const lines = changelog.split(/\r?\n/);
-  const start = lines.findIndex((line) => line.startsWith("## ") && line.includes(target));
+  // 精确匹配 `## [target]`（括号内完整版本号）——includes 子串匹配会把
+  // 0.1.1 误命中到 0.1.10 的段落，发布说明会静默串版本
+  const start = lines.findIndex((line) => line.startsWith(`## [${target}]`));
   if (start === -1) return null;
 
   const body = [];
