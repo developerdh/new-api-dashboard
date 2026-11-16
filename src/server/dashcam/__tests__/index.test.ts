@@ -231,6 +231,52 @@ describe("tr 位客户端断开位解码（D6）", () => {
   });
 });
 
+describe("h 字段 harness 解码（08 会话聚合）", () => {
+  it("parseIndexLine：合法 h 保留，非法值丢弃", () => {
+    const at = "2026-11-13T09:00:00+08:00";
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: "codex" }))?.h).toBe("codex");
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: "claude-code" }))?.h).toBe("claude-code");
+    // 词表外的新词宽松放行（供应商演进加词不要求看板同步发版）
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: "zcode" }))?.h).toBe("zcode");
+    // 非法值：大写 / 超长 / 非法字符 / 非字符串
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: "Codex" }))?.h).toBeUndefined();
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: "a".repeat(33) }))?.h).toBeUndefined();
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: "co dex" }))?.h).toBeUndefined();
+    expect(parseIndexLine(entry(T1, FP_A, at, { h: 42 }))?.h).toBeUndefined();
+    // 旧行无 h 自然缺省
+    expect(parseIndexLine(entry(T1, FP_A, at))?.h).toBeUndefined();
+  });
+
+  it("scanSessions 与 scanThread 都解码 harness", async () => {
+    const text = [
+      entry(T1, FP_A, "2026-11-13T09:00:00+08:00", { k: S1, h: "codex" }),
+      entry(T2, FP_A, "2026-11-13T10:00:00+08:00", { k: S1, h: "dsh" }),
+    ].join("\n") + "\n";
+    await writeFile(join(dir, "index", "2026-11-13.ndjson"), text, "utf8");
+
+    const result = await scan();
+    const byTrace = new Map(result.rows.map((row) => [row.traceId, row]));
+    expect(byTrace.get(T1)?.harness).toBe("codex");
+    expect(byTrace.get(T2)?.harness).toBe("dsh");
+
+    const thread = await scanThread({
+      dir,
+      sessionKey: S1,
+      fingerprints: new Set([FP_A]),
+      start: START,
+      end: END,
+      maxDays: 31,
+    });
+    expect(thread.turns[0]?.harness).toBe("codex");
+    expect(thread.turns[1]?.harness).toBe("dsh");
+  });
+
+  it("无 h 的旧行 harness 缺省（兼容性）", async () => {
+    const result = await scan();
+    expect(result.rows.every((row) => row.harness === undefined)).toBe(true);
+  });
+});
+
 describe("会话聚合", () => {
   it("同指纹同会话键合并，缺键的请求独立成行", () => {
     const rows: DashcamSessionRow[] = [
