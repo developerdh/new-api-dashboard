@@ -18,6 +18,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import {
   blockMatches,
+  EMPTY_BLOCK_FILTER,
   isDefaultFilter,
   MessageFilterBar,
   type BlockFilter,
@@ -149,6 +150,12 @@ function TurnBody({
   const replayShown = filtering ? replay.filter(match) : replay;
   const parseError = envelope.request.parseError ?? envelope.response.parseError;
   const usage = envelope.response.usage;
+  // 标题三分支显式化（替代嵌套三元）
+  const inputSectionTitle = rawOpen
+    ? "原始报文"
+    : filtering
+      ? `本轮输入 · 命中 ${freshShown.length} / ${fresh.length} 项`
+      : `本轮输入 · ${fresh.length} 项`;
 
   return (
     <div className="flex flex-col gap-4 border-t px-3 py-3">
@@ -172,11 +179,7 @@ function TurnBody({
             </button>
           }
         >
-          {rawOpen
-            ? "原始报文"
-            : filtering
-              ? `本轮输入 · 命中 ${freshShown.length} / ${fresh.length} 项`
-              : `本轮输入 · ${fresh.length} 项`}
+          {inputSectionTitle}
         </SectionTitle>
 
         {rawOpen ? (
@@ -340,18 +343,47 @@ export function DashcamThreadDialog({
   onClose: () => void;
 }) {
   const sessionKey = conversation?.sessionKey;
-  const [filter, setFilter] = useState<BlockFilter>({ role: "all", kind: "all", query: "" });
-  const [keywordInput, setKeywordInput] = useState("");
+  const activeKey = sessionKey ?? "";
+  // 过滤词按会话键存（key 不匹配即视为默认）：切换会话时旧搜索词自动失效，
+  // 与下方 overrideState 同一防御模式（避免 effect 内同步 setState）
+  const [filterState, setFilterState] = useState<{
+    key: string;
+    filter: BlockFilter;
+    keywordInput: string;
+  }>({ key: "", filter: EMPTY_BLOCK_FILTER, keywordInput: "" });
+  const current = filterState.key === activeKey
+    ? filterState
+    : { key: activeKey, filter: EMPTY_BLOCK_FILTER, keywordInput: "" };
+  const filter = current.filter;
+  const keywordInput = current.keywordInput;
+  const mutateFilterState = (
+    mutate: (base: { filter: BlockFilter; keywordInput: string }) => Partial<{
+      filter: BlockFilter;
+      keywordInput: string;
+    }>,
+  ): void =>
+    setFilterState((s) => {
+      const base =
+        s.key === activeKey ? s : { key: activeKey, filter: EMPTY_BLOCK_FILTER, keywordInput: "" };
+      const next = mutate({ filter: base.filter, keywordInput: base.keywordInput });
+      return {
+        key: activeKey,
+        filter: next.filter ?? base.filter,
+        keywordInput: next.keywordInput ?? base.keywordInput,
+      };
+    });
   // 防抖：输入停顿 180ms 后再过滤，与详情抽屉一致，避免长会话逐键全量扫描
   useEffect(() => {
     const timer = setTimeout(() => {
-      setFilter((current) => ({ ...current, query: keywordInput.trim().toLowerCase() }));
+      mutateFilterState((base) => ({
+        filter: { ...base.filter, query: base.keywordInput.trim().toLowerCase() },
+      }));
     }, 180);
     return () => clearTimeout(timer);
-  }, [keywordInput]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutateFilterState 随 activeKey 闭包更新，依赖其宿主 key 即可
+  }, [keywordInput, activeKey]);
   const resetFilters = (): void => {
-    setFilter({ role: "all", kind: "all", query: "" });
-    setKeywordInput("");
+    mutateFilterState(() => ({ filter: EMPTY_BLOCK_FILTER, keywordInput: "" }));
   };
   // 全屏是视图偏好，切换会话时保持——习惯全屏看长报文的人不会想每次都退回去
   const [full, setFull] = useState(false);
@@ -457,8 +489,10 @@ export function DashcamThreadDialog({
           <MessageFilterBar
             filter={filter}
             queryInput={keywordInput}
-            onFilterChange={(patch) => setFilter((current) => ({ ...current, ...patch }))}
-            onQueryInputChange={setKeywordInput}
+            onFilterChange={(patch) =>
+              mutateFilterState((base) => ({ filter: { ...base.filter, ...patch } }))
+            }
+            onQueryInputChange={(value) => mutateFilterState(() => ({ keywordInput: value }))}
             onReset={resetFilters}
             searchPlaceholder="在已展开的轮次中搜索"
           />

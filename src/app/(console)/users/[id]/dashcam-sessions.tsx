@@ -72,7 +72,8 @@ export function DashcamSessions({
   const dates = useMemo(() => listDaysInRange(start, end), [start, end]);
   // 选中的日期落在区间外（刚改过全局范围）时自动退回「全部」，不必额外同步状态
   const activeDate = view.date !== null && dates.includes(view.date) ? view.date : null;
-  const window = (activeDate === null ? null : dayRangeOf(activeDate)) ?? { start, end };
+  // 命名避免遮蔽浏览器全局 window（脚枪：后续在此组件加 window.location 会静默拿不到）
+  const dateWindow = (activeDate === null ? null : dayRangeOf(activeDate)) ?? { start, end };
 
   const params = new URLSearchParams({
     userId,
@@ -108,14 +109,162 @@ export function DashcamSessions({
   };
 
   const detailParams = new URLSearchParams({
-    start: String(window.start),
-    end: String(window.end),
+    start: String(dateWindow.start),
+    end: String(dateWindow.end),
     group: view.group,
   });
   if (activeDate !== null) detailParams.set("date", activeDate);
   if (displayName !== "") detailParams.set("name", displayName);
   if (username !== "") detailParams.set("username", username);
   const detailHref = `/users/${encodeURIComponent(userId)}/sessions?${detailParams.toString()}`;
+
+  // 渲染分支按状态收敛为平铺 if 链（替代嵌套三元，单个状态可独立增改）
+  let body: ReactNode;
+  if (api.error !== undefined) {
+    body = (
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-sm">
+        <p className="text-muted-foreground">{api.error.message}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="sessions-retry"
+          onClick={api.refresh}
+        >
+          重试
+        </Button>
+      </div>
+    );
+  } else if (!matched || data === undefined) {
+    body = (
+      <div
+        className="h-40 w-full rounded-lg skeleton-shimmer"
+        aria-busy="true"
+        data-testid="sessions-loading"
+      />
+    );
+  } else if (data.available === false) {
+    body = (
+      <Notice>
+        会话监控未启用（未配置 <span className="font-mono">DASHCAM_DIR</span>
+        ）。统计功能不受影响；配置并只读挂载采集目录后即可查看会话。
+      </Notice>
+    );
+  } else if (data.lookupError !== undefined) {
+    body = (
+      <Notice>
+        无法反查 token 指纹（{data.lookupError === "permission_denied" ? "缺少 tokens 表读权限" : "数据库暂不可用"}
+        ），因此无法定位该用户的采集记录。
+      </Notice>
+    );
+  } else if (data.fingerprintCount === 0) {
+    body = <Notice>该用户没有可用的 token 指纹，无法定位采集记录。</Notice>;
+  } else if (rows === 0) {
+    body = (
+      <Notice>
+        {activeDate === null ? "所选区间内无采集记录。" : `${activeDate} 无采集记录。`}
+        {page > 1 ? (
+          <span className="ml-1">
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              data-testid="sessions-back-to-first"
+              onClick={() => setPage(1)}
+            >
+              回到第一页
+            </button>
+          </span>
+        ) : null}
+      </Notice>
+    );
+  } else {
+    body = (
+      <>
+        {partial ? (
+          <p className="mb-2 rounded-lg border border-dashed border-warning/50 bg-warning/10 px-3 py-1.5 text-[11px]">
+            所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
+          </p>
+        ) : null}
+
+        <UngroupedHint
+          count={
+            view.group === "session"
+              ? conversations.filter((row) => row.sessionKey === undefined).length
+              : sessions.filter((row) => row.sessionKey === undefined).length
+          }
+        />
+
+        {/* 100 条/页时整张卡会长到几屏高，限高滚动 + 粘性表头，页脚才够得着 */}
+        {/* 内层 table-container 自带 overflow-x-auto，会成为 sticky 的滚动容器（且它不纵向滚动），
+            这里改成 visible，让限高滚动与粘性表头都落在这一层 */}
+        <div className="max-h-[70vh] overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
+          {view.group === "session" ? (
+            <ConversationTable
+              rows={conversations}
+              onOpen={(row) => {
+                if (row.sessionKey === undefined) setSelected(row.last);
+                else setThread(row);
+              }}
+            />
+          ) : (
+            <RequestTable rows={sessions} onOpen={setSelected} />
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {total === null
+              ? `第 ${page} 页 · 每页 ${pageSize} 条`
+              : `共 ${total} 个会话 · 第 ${page} / ${totalPages ?? 1} 页`}
+            {data.unmatched === undefined
+              ? ""
+              : ` · 另有 ${data.unmatched} 条无法归属到该用户（无效或已失效 key）`}
+          </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1" role="group" aria-label="每页条数">
+              <span className="mr-0.5">每页</span>
+              {PAGE_SIZES.map((size) => (
+                <Button
+                  key={size}
+                  type="button"
+                  size="sm"
+                  variant={pageSize === size ? "secondary" : "ghost"}
+                  aria-pressed={pageSize === size}
+                  data-testid="sessions-page-size"
+                  onClick={() => {
+                    setPageSize(size);
+                    setPage(1);
+                  }}
+                >
+                  {size}
+                </Button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={page <= 1}
+              data-testid="sessions-prev-page"
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
+              上一页
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={totalPages === null ? rows < pageSize : page >= totalPages}
+              data-testid="sessions-next-page"
+              onClick={() => setPage((value) => value + 1)}
+            >
+              下一页
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <Card data-testid="sessions-card" className="gap-3 py-5">
@@ -151,125 +300,7 @@ export function DashcamSessions({
         {data !== undefined && data.available === true && data.sampling !== undefined ? (
           <SamplingNotice sampling={data.sampling} />
         ) : null}
-        {api.error !== undefined ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-sm">
-            <p className="text-muted-foreground">{api.error.message}</p>
-            <Button type="button" size="sm" variant="outline" onClick={api.refresh}>
-              重试
-            </Button>
-          </div>
-        ) : !matched ? (
-          <div className="h-40 w-full rounded-lg skeleton-shimmer" aria-busy="true" data-testid="sessions-loading" />
-        ) : data.available === false ? (
-          <Notice>
-            会话监控未启用（未配置 <span className="font-mono">DASHCAM_DIR</span>
-            ）。统计功能不受影响；配置并只读挂载采集目录后即可查看会话。
-          </Notice>
-        ) : data.lookupError !== undefined ? (
-          <Notice>
-            无法反查 token 指纹（{data.lookupError === "permission_denied" ? "缺少 tokens 表读权限" : "数据库暂不可用"}
-            ），因此无法定位该用户的采集记录。
-          </Notice>
-        ) : data.fingerprintCount === 0 ? (
-          <Notice>该用户没有可用的 token 指纹，无法定位采集记录。</Notice>
-        ) : rows === 0 ? (
-          <Notice>
-            {activeDate === null ? "所选区间内无采集记录。" : `${activeDate} 无采集记录。`}
-            {page > 1 ? (
-              <span className="ml-1">
-                <button
-                  type="button"
-                  className="text-primary hover:underline"
-                  onClick={() => setPage(1)}
-                >
-                  回到第一页
-                </button>
-              </span>
-            ) : null}
-          </Notice>
-        ) : (
-          <>
-            {partial ? (
-              <p className="mb-2 rounded-lg border border-dashed border-warning/50 bg-warning/10 px-3 py-1.5 text-[11px]">
-                所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
-              </p>
-            ) : null}
-
-            <UngroupedHint
-              count={
-                view.group === "session"
-                  ? conversations.filter((row) => row.sessionKey === undefined).length
-                  : sessions.filter((row) => row.sessionKey === undefined).length
-              }
-            />
-
-            {/* 100 条/页时整张卡会长到几屏高，限高滚动 + 粘性表头，页脚才够得着 */}
-            {/* 内层 table-container 自带 overflow-x-auto，会成为 sticky 的滚动容器（且它不纵向滚动），
-                这里改成 visible，让限高滚动与粘性表头都落在这一层 */}
-            <div className="max-h-[70vh] overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
-              {view.group === "session" ? (
-                <ConversationTable
-                  rows={conversations}
-                  onOpen={(row) => {
-                    if (row.sessionKey === undefined) setSelected(row.last);
-                    else setThread(row);
-                  }}
-                />
-              ) : (
-                <RequestTable rows={sessions} onOpen={setSelected} />
-              )}
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>
-                {total === null
-                  ? `第 ${page} 页 · 每页 ${pageSize} 条`
-                  : `共 ${total} 个会话 · 第 ${page} / ${totalPages ?? 1} 页`}
-                {data.unmatched === undefined
-                  ? ""
-                  : ` · 另有 ${data.unmatched} 条无法归属到该用户（无效或已失效 key）`}
-              </span>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1" role="group" aria-label="每页条数">
-                  <span className="mr-0.5">每页</span>
-                  {PAGE_SIZES.map((size) => (
-                    <Button
-                      key={size}
-                      type="button"
-                      size="sm"
-                      variant={pageSize === size ? "secondary" : "ghost"}
-                      aria-pressed={pageSize === size}
-                      onClick={() => {
-                        setPageSize(size);
-                        setPage(1);
-                      }}
-                    >
-                      {size}
-                    </Button>
-                  ))}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={page <= 1}
-                  onClick={() => setPage((value) => Math.max(1, value - 1))}
-                >
-                  上一页
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={totalPages === null ? rows < pageSize : page >= totalPages}
-                  onClick={() => setPage((value) => value + 1)}
-                >
-                  下一页
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
+        {body}
       </div>
 
       <DashcamDetailDialog
@@ -283,8 +314,8 @@ export function DashcamSessions({
       <DashcamThreadDialog
         userId={userId}
         conversation={thread}
-        start={window.start}
-        end={window.end}
+        start={dateWindow.start}
+        end={dateWindow.end}
         onClose={() => {
           setThread(null);
         }}

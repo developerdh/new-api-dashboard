@@ -9,7 +9,7 @@
  */
 import type { EChartsOption } from "echarts";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import { ChartExportButton } from "@/components/charts/chart-export-button";
 import { GranularitySwitch } from "@/components/charts/granularity-switch";
@@ -18,6 +18,7 @@ import { MetricSwitch } from "@/components/charts/metric-switch";
 import { ModelCrossStack } from "@/components/charts/model-cross-stack";
 import { TREND_METRICS, type TrendMetric } from "@/components/charts/trend-line";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
+import { SectionBody } from "@/components/section-body";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -28,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { escapeHtml } from "@/lib/export-html";
 import { formatCompactNumber, formatNumber, formatQuota } from "@/lib/format";
 import {
   TREND_MODEL_MAX,
@@ -48,43 +50,6 @@ const MODEL_RANKING_CHART_LIMIT = 10;
 
 type RankingSortKey = "totalQuota" | "avgCost";
 
-function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-sm">
-      <p className="text-muted-foreground">{message}</p>
-      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-        重试
-      </Button>
-    </div>
-  );
-}
-
-function SectionBody({
-  loading,
-  error,
-  onRetry,
-  skeletonHeight,
-  children,
-}: {
-  loading: boolean;
-  error?: { message: string };
-  onRetry: () => void;
-  skeletonHeight: number;
-  children: ReactNode;
-}) {
-  if (error !== undefined) return <ErrorBox message={error.message} onRetry={onRetry} />;
-  if (loading) {
-    return (
-      <div
-        className="w-full rounded-lg skeleton-shimmer"
-        style={{ height: skeletonHeight }}
-        aria-busy="true"
-      />
-    );
-  }
-  return <>{children}</>;
-}
-
 /** 模型排行横向柱状：坐标轴 / 柱标签 / tooltip 统一按所选维度格式化，并按该维度降序。 */
 function formatRankingValue(metric: TrendMetric, value: number): string {
   return metric === "totalQuota" ? formatQuota(value) : formatCompactNumber(value);
@@ -103,7 +68,8 @@ export function buildModelRankingOption(
         const items = Array.isArray(params) ? params : [params];
         const first = items[0] as { dataIndex?: number; value?: unknown } | undefined;
         const row = rows[first?.dataIndex ?? -1];
-        const name = row === undefined ? "" : row.modelName;
+        // modelName 为请求方可控字符串，tooltip 按 HTML 渲染必须转义防注入
+        const name = row === undefined ? "" : escapeHtml(row.modelName);
         return `${name}<br/>${formatRankingValue(metric, Number(first?.value ?? 0))}`;
       },
     },

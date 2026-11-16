@@ -68,8 +68,12 @@ export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseA
 
     let cancelled = false;
     const controller = new AbortController();
+    let inFlight = false;
 
     const run = async (showLoading: boolean): Promise<void> => {
+      // 轮询触发时上一请求可能仍在途：跳过本次，避免慢响应后到覆盖新数据
+      if (inFlight) return;
+      inFlight = true;
       if (showLoading) setLoading(true);
       try {
         const response = await fetch(url, {
@@ -86,8 +90,22 @@ export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseA
           return;
         }
 
-        const body = (await response.json()) as ApiEnvelope<T>;
+        // 先取文本再解析：反代 502/504 的 HTML 错误页不是 JSON，直接 json() 会把
+        // 真实状态码吞进 catch、误导性地上报为「网络失败」
+        const text = await response.text();
         if (cancelled) return;
+        let body: ApiEnvelope<T>;
+        try {
+          body = JSON.parse(text) as ApiEnvelope<T>;
+        } catch {
+          body = {
+            ok: false,
+            error: {
+              code: `http_${response.status}`,
+              message: `请求失败（HTTP ${response.status}）`,
+            },
+          };
+        }
 
         if (!response.ok || body.ok === false) {
           setError(
@@ -107,6 +125,7 @@ export function useApi<T>(url: string | null, options: UseApiOptions = {}): UseA
         if (cause instanceof DOMException && cause.name === "AbortError") return;
         setError({ code: "network_error", message: "网络请求失败，请稍后重试" });
       } finally {
+        inFlight = false;
         if (!cancelled) setLoading(false);
       }
     };

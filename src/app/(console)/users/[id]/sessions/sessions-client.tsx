@@ -85,7 +85,8 @@ export function SessionsClient({ userId }: { userId: string }) {
 
   const dates = useMemo(() => listDaysInRange(range.start, range.end), [range.start, range.end]);
   const activeDate = view.date !== null && dates.includes(view.date) ? view.date : null;
-  const window = (activeDate === null ? null : dayRangeOf(activeDate)) ?? range;
+  // 命名避免遮蔽浏览器全局 window（脚枪：后续在此组件加 window.location 会静默拿不到）
+  const dateWindow = (activeDate === null ? null : dayRangeOf(activeDate)) ?? range;
 
   const params = new URLSearchParams({
     userId,
@@ -125,10 +126,11 @@ export function SessionsClient({ userId }: { userId: string }) {
   }, [api.data]);
 
   const data = api.data;
-  // 切换口径（日期/粒度/形态/每页条数）的过渡期：响应未到时 rows 已被 reset 清空，
+  // 切换口径（日期/粒度/形态/每页条数）或手动刷新的过渡期：响应未到时 rows 已被 reset 清空，
   // 若沿用旧 data 会直接命中「无采集记录」空态——其实是还没加载完。
+  // 手动刷新的请求 URL 与当前一致（dataUrl 未变），须靠「rows 已清空」识别过渡态。
   // page=1 的切换统一落加载骨架；page>1 是「加载更多」追加语义，保留旧行 + 页脚 spinner。
-  const switching = api.loading && page === 1 && api.dataUrl !== requestUrl;
+  const switching = api.loading && page === 1 && (api.dataUrl !== requestUrl || rows.length === 0);
   const matched = !switching && data !== undefined && data.grouped === (view.group === "session");
   const total = matched ? data.total : null;
   const partial = matched && data.partial === true;
@@ -155,6 +157,144 @@ export function SessionsClient({ userId }: { userId: string }) {
 
   const conversationRows = grouped ? (rows as DashcamConversationRow[]) : [];
   const sessionRows = grouped ? [] : (rows as DashcamSessionRow[]);
+
+  // 渲染分支按状态收敛为平铺 if 链（替代嵌套三元，单个状态可独立增改）
+  let body: ReactNode;
+  if (api.error !== undefined) {
+    body = (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <div className="flex w-full flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-sm">
+          <p className="text-muted-foreground">{api.error.message}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="sessions-retry"
+            onClick={api.refresh}
+          >
+            重试
+          </Button>
+        </div>
+      </div>
+    );
+  } else if (!matched || data === undefined) {
+    body = (
+      <div
+        className="h-full w-full rounded-lg skeleton-shimmer"
+        aria-busy="true"
+        data-testid="sessions-loading"
+      />
+    );
+  } else if (data.available === false) {
+    body = (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <Notice>
+          会话监控未启用（未配置 <span className="font-mono">DASHCAM_DIR</span>
+          ），配置并只读挂载采集目录后即可查看。
+        </Notice>
+      </div>
+    );
+  } else if (data.lookupError !== undefined) {
+    body = (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <Notice>
+          无法反查 token 指纹（
+          {data.lookupError === "permission_denied" ? "缺少 tokens 表读权限" : "数据库暂不可用"}
+          ），因此无法定位该用户的采集记录。
+        </Notice>
+      </div>
+    );
+  } else if (data.fingerprintCount === 0) {
+    body = (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <Notice>该用户没有可用的 token 指纹，无法定位采集记录。</Notice>
+      </div>
+    );
+  } else if (loaded === 0) {
+    body = (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <Notice>
+          {activeDate === null ? "所选区间内无采集记录。" : `${activeDate} 无采集记录。`}
+        </Notice>
+      </div>
+    );
+  } else {
+    body = (
+      <>
+        {partial ? (
+          <p className="mb-2 shrink-0 rounded-lg border border-dashed border-warning/50 bg-warning/10 px-3 py-1.5 text-[11px]">
+            所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
+          </p>
+        ) : null}
+
+        <UngroupedHint count={ungrouped} />
+
+        {/* 唯一的滚动区；内层 table-container 让位给这里，粘性表头才会生效 */}
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
+          {grouped ? (
+            <ConversationTable
+              rows={conversationRows}
+              onOpen={(row) => {
+                if (row.sessionKey === undefined) setSelected(row.last);
+                else setThread(row);
+              }}
+            />
+          ) : (
+            <RequestTable rows={sessionRows} onOpen={setSelected} />
+          )}
+        </div>
+
+        <div className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span data-testid="sessions-load-state">
+            已加载 {loaded}
+            {total === null ? " 条请求" : ` / ${total} 个会话`}
+            {data.unmatched === undefined
+              ? ""
+              : ` · 另有 ${data.unmatched} 条无法归属到该用户`}
+          </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1" role="group" aria-label="每次加载条数">
+              <span className="mr-0.5">每次</span>
+              {STEPS.map((size) => (
+                <Button
+                  key={size}
+                  type="button"
+                  size="sm"
+                  variant={step === size ? "secondary" : "ghost"}
+                  aria-pressed={step === size}
+                  data-testid="sessions-step-size"
+                  onClick={() => {
+                    setStep(size);
+                    reset();
+                  }}
+                >
+                  {size}
+                </Button>
+              ))}
+            </div>
+            {api.loading && page > 1 ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                加载中…
+              </span>
+            ) : canLoadMore ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                data-testid="sessions-load-more"
+                onClick={() => setPage((value) => value + 1)}
+              >
+                加载更多
+              </Button>
+            ) : (
+              <span>已是全部</span>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <div
@@ -194,116 +334,7 @@ export function SessionsClient({ userId }: { userId: string }) {
           {data !== undefined && data.available === true && data.sampling !== undefined ? (
             <SamplingNotice sampling={data.sampling} />
           ) : null}
-          {api.error !== undefined ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center">
-              <div className="flex w-full flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-10 text-sm">
-                <p className="text-muted-foreground">{api.error.message}</p>
-                <Button type="button" size="sm" variant="outline" onClick={api.refresh}>
-                  重试
-                </Button>
-              </div>
-            </div>
-          ) : !matched ? (
-            <div className="h-full w-full rounded-lg skeleton-shimmer" aria-busy="true" data-testid="sessions-loading" />
-          ) : data.available === false ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center">
-              <Notice>
-                会话监控未启用（未配置 <span className="font-mono">DASHCAM_DIR</span>
-                ），配置并只读挂载采集目录后即可查看。
-              </Notice>
-            </div>
-          ) : data.lookupError !== undefined ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center">
-              <Notice>
-                无法反查 token 指纹（
-                {data.lookupError === "permission_denied" ? "缺少 tokens 表读权限" : "数据库暂不可用"}
-                ），因此无法定位该用户的采集记录。
-              </Notice>
-            </div>
-          ) : data.fingerprintCount === 0 ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center">
-              <Notice>该用户没有可用的 token 指纹，无法定位采集记录。</Notice>
-            </div>
-          ) : loaded === 0 ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center">
-              <Notice>
-                {activeDate === null ? "所选区间内无采集记录。" : `${activeDate} 无采集记录。`}
-              </Notice>
-            </div>
-          ) : (
-            <>
-              {partial ? (
-                <p className="mb-2 shrink-0 rounded-lg border border-dashed border-warning/50 bg-warning/10 px-3 py-1.5 text-[11px]">
-                  所选范围内请求过多，会话统计只覆盖了最近一部分（总数可能偏少）。建议用「按日期」收窄。
-                </p>
-              ) : null}
-
-              <UngroupedHint count={ungrouped} />
-
-              {/* 唯一的滚动区；内层 table-container 让位给这里，粘性表头才会生效 */}
-              <div className="min-h-0 flex-1 overflow-auto rounded-xl border [&>[data-slot=table-container]]:overflow-visible">
-                {grouped ? (
-                  <ConversationTable
-                    rows={conversationRows}
-                    onOpen={(row) => {
-                      if (row.sessionKey === undefined) setSelected(row.last);
-                      else setThread(row);
-                    }}
-                  />
-                ) : (
-                  <RequestTable rows={sessionRows} onOpen={setSelected} />
-                )}
-              </div>
-
-              <div className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span data-testid="sessions-load-state">
-                  已加载 {loaded}
-                  {total === null ? " 条请求" : ` / ${total} 个会话`}
-                  {data.unmatched === undefined
-                    ? ""
-                    : ` · 另有 ${data.unmatched} 条无法归属到该用户`}
-                </span>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1" role="group" aria-label="每次加载条数">
-                    <span className="mr-0.5">每次</span>
-                    {STEPS.map((size) => (
-                      <Button
-                        key={size}
-                        type="button"
-                        size="sm"
-                        variant={step === size ? "secondary" : "ghost"}
-                        aria-pressed={step === size}
-                        onClick={() => {
-                          setStep(size);
-                          reset();
-                        }}
-                      >
-                        {size}
-                      </Button>
-                    ))}
-                  </div>
-                  {api.loading && page > 1 ? (
-                    <span className="inline-flex items-center gap-1">
-                      <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                      加载中…
-                    </span>
-                  ) : canLoadMore ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      data-testid="sessions-load-more"
-                      onClick={() => setPage((value) => value + 1)}
-                    >
-                      加载更多
-                    </Button>
-                  ) : (
-                    <span>已是全部</span>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
+          {body}
         </div>
       </Card>
 
@@ -318,8 +349,8 @@ export function SessionsClient({ userId }: { userId: string }) {
       <DashcamThreadDialog
         userId={userId}
         conversation={thread}
-        start={window.start}
-        end={window.end}
+        start={dateWindow.start}
+        end={dateWindow.end}
         onClose={() => {
           setThread(null);
         }}

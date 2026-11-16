@@ -36,6 +36,11 @@
 | `sessions-load-state` | 独立页页脚「已加载 N」 | `sessions-client.tsx` | 累加加载计数断言 | T7 |
 | `sessions-load-more` | 「加载更多」按钮（可加载时才存在） | `sessions-client.tsx` | 累加加载动作 | T7 |
 | `sessions-loading` | 列表加载骨架（初始 / 切换日期等口径 / 翻页过渡态） | `dashcam-sessions.tsx`、`sessions-client.tsx`（两入口） | 断言切换筛选有加载反馈、空态不提前出现 | T4（可选） |
+| `sessions-retry` | 错误态「重试」按钮（两入口共用命名） | `dashcam-sessions.tsx`、`sessions-client.tsx` | 接口失败后重试 | 暂无（预留） |
+| `sessions-page-size`（多个，20/50/100） | 卡片入口「每页条数」切换按钮组 | `dashcam-sessions.tsx` | 切换翻页步长 | 暂无（预留） |
+| `sessions-prev-page` / `sessions-next-page` | 卡片入口上一页 / 下一页按钮 | `dashcam-sessions.tsx` | 卡片入口翻页 | 暂无（预留） |
+| `sessions-back-to-first` | 卡片入口空态「回到第一页」按钮（page>1 时空态才带） | `dashcam-sessions.tsx` | 翻页过头恢复 | 暂无（预留） |
+| `sessions-step-size`（多个，20/50） | 独立页「每次」加载步长切换按钮组 | `sessions-client.tsx` | 切换累加步长 | 暂无（预留） |
 | `sampling-notice` | 抽样口径提示条（仅抽样开启时渲染） | `src/components/dashcam/sampling-notice.tsx` | 断言提示出现/不出现 | T8 |
 
 ### 过滤条（`src/components/dashcam/session-filters.tsx`，两入口共用）
@@ -55,6 +60,15 @@
 | `date-picker-panel` | 日历面板（role=dialog） | 断言面板打开 | T4 |
 | `date-picker-day`（多个，带 `data-date="YYYY-MM-DD"`） | 日历某天 | 按具体日期选择：`getByTestId('date-picker-day')` + `locator('[data-date="…"]')` | T4 |
 | `date-picker-clear` | 「全部日期」清除按钮 | 复位过滤 | T4 |
+
+### 消息过滤条（`src/components/dashcam/dashcam-message-filters.tsx`，详情/线程抽屉共用）
+
+| testid | 元素 | 用途 | 关联用例 |
+|---|---|---|---|
+| `detail-filter-role-<key>`（多个，all/system/user/assistant/tool） | 角色 chips | 按角色过滤正文 | 暂无（预留） |
+| `detail-filter-kind-<key>`（多个，all/text/tool/image） | 类型 chips | 按类型过滤正文 | 暂无（预留） |
+| `detail-filter-query` | 关键词搜索输入框 | 输入过滤词 | 暂无（预留） |
+| `detail-filter-clear` | 「清空」按钮（非默认过滤时才渲染） | 复位过滤 | 暂无（预留） |
 
 ### 表格（`src/components/dashcam/session-table.tsx`，两入口共用）
 

@@ -11,7 +11,7 @@
  */
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import { InactiveUsersCard } from "@/components/cards/inactive-users-card";
 import { OverviewCards, type DeltaMetric } from "@/components/cards/overview-cards";
@@ -22,6 +22,7 @@ import { MetricSwitch } from "@/components/charts/metric-switch";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
 import { UserRankingBar } from "@/components/charts/user-ranking-bar";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
+import { SectionBody } from "@/components/section-body";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -39,7 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatMillions, formatNumber, formatQuota } from "@/lib/format";
+import { formatCompactNumber, formatNumber, formatQuota } from "@/lib/format";
 import { primaryUserLabel, secondaryUserLabel } from "@/lib/user-label";
 import {
   lastNDaysRange,
@@ -69,43 +70,6 @@ function seriesSum(points: Array<TrendPoint | null> | undefined, key: DeltaMetri
 function percentDelta(current: number, previous: number): number | undefined {
   if (previous <= 0) return undefined;
   return ((current - previous) / previous) * 100;
-}
-
-function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-sm">
-      <p className="text-muted-foreground">{message}</p>
-      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-        重试
-      </Button>
-    </div>
-  );
-}
-
-function SectionBody({
-  loading,
-  error,
-  onRetry,
-  skeletonHeight,
-  children,
-}: {
-  loading: boolean;
-  error?: { message: string };
-  onRetry: () => void;
-  skeletonHeight: number;
-  children: ReactNode;
-}) {
-  if (error !== undefined) return <ErrorBox message={error.message} onRetry={onRetry} />;
-  if (loading) {
-    return (
-      <div
-        className="w-full rounded-lg skeleton-shimmer"
-        style={{ height: skeletonHeight }}
-        aria-busy="true"
-      />
-    );
-  }
-  return <>{children}</>;
 }
 
 export function OverviewClient() {
@@ -363,7 +327,7 @@ export function OverviewClient() {
                   <TableHead>用户</TableHead>
                   <TableHead className="text-right">消耗</TableHead>
                   <TableHead className="text-right">请求数</TableHead>
-                  <TableHead className="text-right">Token (M)</TableHead>
+                  <TableHead className="text-right">Token</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -398,7 +362,7 @@ export function OverviewClient() {
                       {formatNumber(row.requestCount)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {formatMillions(row.totalTokens)}
+                      {formatCompactNumber(row.totalTokens)}
                     </TableCell>
                   </TableRow>
                 ))}

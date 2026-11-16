@@ -15,8 +15,9 @@ function PageSkeleton() {
         <div className="h-7 w-32 rounded-lg bg-muted skeleton-shimmer" />
         <div className="h-4 w-2/3 rounded-lg bg-muted skeleton-shimmer" />
       </div>
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, index) => (
+      {/* 与 OverviewClient 实载一致（sm:2 / lg:4 共 4 张指标卡），避免加载完成时列数与数量跳变 */}
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
           <div key={index} className="h-40 rounded-xl border bg-muted/60 skeleton-shimmer" />
         ))}
       </section>

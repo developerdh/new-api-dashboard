@@ -11,7 +11,7 @@
  * 哪个是数据），合并成「一个下载按钮 + 菜单」后语义自明，标题栏也少挤一格。
  */
 import { ChevronDown, Download, FileCode2, FileSpreadsheet } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { exportChartByName } from "@/lib/chart-export";
+import { cn } from "@/lib/utils";
 
 export interface ChartExportButtonProps {
   /** 与图表组件的 exportName 一致。 */
@@ -52,20 +53,34 @@ export function ChartExportButton({
   csvLabel = "数据表格",
 }: ChartExportButtonProps) {
   const [exporting, setExporting] = useState(false);
+  // 导出失败/图表未就绪的短暂提示：置为警示色 + title，2.5s 后复位（否则点击只闪一下静默无反应）
+  const [hint, setHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (hint === null) return;
+    const timer = setTimeout(() => setHint(null), 2_500);
+    return () => clearTimeout(timer);
+  }, [hint]);
 
   const exportHtml = async (): Promise<void> => {
     setExporting(true);
+    setHint(null);
     try {
-      await exportChartByName(exportName, { title: title ?? exportName });
+      const exported = await exportChartByName(exportName, { title: title ?? exportName });
+      // 空数据态 / 实例已销毁时注册表里找不到图表
+      if (!exported) setHint("当前无可导出的图表");
     } catch (error) {
       console.error(
         "[chart] export failed",
         error instanceof Error ? error.message : String(error),
       );
+      setHint("导出失败，请重试");
     } finally {
       setExporting(false);
     }
   };
+
+  const feedbackTitle = hint ?? label;
 
   if (csvHref === undefined) {
     return (
@@ -73,11 +88,11 @@ export function ChartExportButton({
         type="button"
         size="icon"
         variant="ghost"
-        className="size-7 text-muted-foreground"
+        className={cn("size-7 text-muted-foreground", hint !== null && "text-destructive")}
         onClick={() => void exportHtml()}
         disabled={exporting}
-        title={label}
-        aria-label={label}
+        title={feedbackTitle}
+        aria-label={feedbackTitle}
       >
         {exporting ? SPINNER : <Download className="size-3.5" />}
       </Button>
@@ -93,10 +108,13 @@ export function ChartExportButton({
           type="button"
           size="icon"
           variant="ghost"
-          className="size-7 w-auto gap-0.5 px-1.5 text-muted-foreground"
+          className={cn(
+            "size-7 w-auto gap-0.5 px-1.5 text-muted-foreground",
+            hint !== null && "text-destructive",
+          )}
           disabled={exporting}
-          title={menuLabel}
-          aria-label={menuLabel}
+          title={hint ?? menuLabel}
+          aria-label={hint ?? menuLabel}
           aria-haspopup="menu"
         >
           {exporting ? SPINNER : <Download className="size-3.5" />}

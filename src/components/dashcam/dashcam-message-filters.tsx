@@ -56,6 +56,9 @@ export interface BlockFilter {
   query: string;
 }
 
+/** 默认过滤（不过滤）；切换记录/会话时按此复位。 */
+export const EMPTY_BLOCK_FILTER: BlockFilter = { role: "all", kind: "all", query: "" };
+
 export function blockMatches(block: DashcamBlock, filter: BlockFilter): boolean {
   if (filter.role !== "all" && block.role !== filter.role) return false;
   if (!kindMatches(block, filter.kind)) return false;
@@ -89,6 +92,7 @@ export function MessageFilterBar({
         <Chip
           key={item.key}
           active={filter.role === item.key}
+          data-testid={`detail-filter-role-${item.key}`}
           onClick={() => onFilterChange({ role: item.key })}
         >
           {item.label}
@@ -99,6 +103,7 @@ export function MessageFilterBar({
         <Chip
           key={item.key}
           active={filter.kind === item.key}
+          data-testid={`detail-filter-kind-${item.key}`}
           onClick={() => onFilterChange({ kind: item.key })}
         >
           {item.label}
@@ -108,10 +113,17 @@ export function MessageFilterBar({
         value={queryInput}
         onChange={(event) => onQueryInputChange(event.target.value)}
         placeholder={searchPlaceholder}
+        aria-label={searchPlaceholder}
+        data-testid="detail-filter-query"
         className="ml-1 h-6 w-32 rounded-md border border-input bg-transparent px-2 text-[11px] outline-none focus-visible:border-ring"
       />
       {isDefaultFilter(filter) ? null : (
-        <button type="button" className="ml-1 text-[11px] text-primary hover:underline" onClick={onReset}>
+        <button
+          type="button"
+          className="ml-1 text-[11px] text-primary hover:underline"
+          data-testid="detail-filter-clear"
+          onClick={onReset}
+        >
           清空
         </button>
       )}

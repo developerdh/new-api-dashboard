@@ -10,7 +10,7 @@
 import { Download } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import { MetricCard } from "@/components/cards/MetricCard";
 import { CalendarHeatmap } from "@/components/charts/calendar-heatmap";
@@ -20,6 +20,7 @@ import { ModelPie } from "@/components/charts/model-pie";
 import { TokenBreakdownList } from "@/components/charts/token-breakdown-list";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
+import { SectionBody } from "@/components/section-body";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -50,45 +51,6 @@ const RECENT_PAGE_SIZE = 10;
 
 /** 与 `src/server/queries/common.ts` 的 `EXCLUDED_STAT_USERNAMES` 保持一致的展示提示。 */
 const EXCLUDED_STAT_ACCOUNT = "admin";
-
-function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-sm">
-      <p className="text-muted-foreground">{message}</p>
-      {onRetry !== undefined ? (
-        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-          重试
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
-function SectionBody({
-  loading,
-  error,
-  onRetry,
-  skeletonHeight,
-  children,
-}: {
-  loading: boolean;
-  error?: { message: string };
-  onRetry?: () => void;
-  skeletonHeight: number;
-  children: ReactNode;
-}) {
-  if (error !== undefined) return <ErrorBox message={error.message} onRetry={onRetry} />;
-  if (loading) {
-    return (
-      <div
-        className="w-full rounded-lg skeleton-shimmer"
-        style={{ height: skeletonHeight }}
-        aria-busy="true"
-      />
-    );
-  }
-  return <>{children}</>;
-}
 
 export function UserClient({ userId }: { userId: string }) {
   const searchParams = useSearchParams();
