@@ -25,12 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # 不能开 fetch-tags：tag push 事件 + 浅克隆下，actions/checkout 会把
+      # 「事件 commit SHA」与「tag ref」双源写入同一 refs/tags/*，附注标签的
+      # tag object ≠ commit，实测 v0.1.1 tag push 触发即挂（Cannot fetch both ...）。
+      # tag 附注改由下方发布说明步骤按需补取（单 refspec，不与 commit 写入冲突）。
       - uses: actions/checkout@v4
-        with:
-          # 不能开 fetch-tags：tag push 事件 + 浅克隆下，actions/checkout 会把
-          # 「事件 commit SHA」与「tag ref」双源写入同一 refs/tags/*，附注标签的
-          # tag object ≠ commit，实测 v0.1.1 tag push 触发即挂（Cannot fetch both ...）。
-          # tag 附注改由下方发布说明步骤按需补取（单 refspec，不与 commit 写入冲突）。
 
       - uses: actions/setup-go@v5
         with:
