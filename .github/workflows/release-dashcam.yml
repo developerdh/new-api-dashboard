@@ -27,8 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 提取 tag 附注作为发布说明需要本地有 annotated tag 对象
-          fetch-tags: true
+          # 不能开 fetch-tags：tag push 事件 + 浅克隆下，actions/checkout 会把
+          # 「事件 commit SHA」与「tag ref」双源写入同一 refs/tags/*，附注标签的
+          # tag object ≠ commit，实测 v0.1.1 tag push 触发即挂（Cannot fetch both ...）。
+          # tag 附注改由下方发布说明步骤按需补取（单 refspec，不与 commit 写入冲突）。
 
       - uses: actions/setup-go@v5
         with:
@@ -61,6 +63,11 @@ jobs:
       - name: 提取 tag 附注作为发布说明
         run: |
           TAG="dashcam-${{ steps.v.outputs.value }}"
+          # 按需补取附注标签对象（单 refspec 取 ref，不会与 checkout 的 commit 写入冲突）；
+          # workflow_dispatch 触发时同样依赖此处拿到远端已有 tag 的附注
+          if ! git cat-file -t "$TAG" >/dev/null 2>&1; then
+            git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG" || true
+          fi
           NOTES=""
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [ "$(git cat-file -t "$TAG")" = "tag" ]; then
             NOTES="$(git tag -l --format='%(contents)' "$TAG")"
