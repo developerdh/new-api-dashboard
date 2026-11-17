@@ -4,6 +4,7 @@
  * 口径（实测见 db-schema-notes §3.7）：openai 语义 prompt_tokens 已含缓存，
  * anthropic 语义不含 —— 有效输入 = prompt + anthropic 行缓存读写修正量；
  * 缓存命中率 = 缓存读取 / 有效输入。缓存为输入的细分，绝不与输入并列相加。
+ * 口径说明不在此重复展示，由卡片标题旁的 i 图标（InfoHint）承载。
  */
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -152,7 +153,13 @@ export function TokenBreakdownList({
               <dl className="flex flex-col gap-1 pb-0.5 pl-3.5 text-xs text-muted-foreground">
                 {breakdown.cacheRows.map((cacheRow) => (
                   <div key={cacheRow.key} className="flex items-baseline justify-between gap-3">
-                    <dt>{cacheRow.label}</dt>
+                    <dt className="flex items-center gap-1.5">
+                      <span
+                        className="size-1.5 rounded-full bg-chart-2/60"
+                        aria-hidden="true"
+                      />
+                      {cacheRow.label}
+                    </dt>
                     <dd className="tabular-nums">
                       {formatCompactNumber(cacheRow.tokens)}
                       <span className="ml-1.5">
@@ -164,11 +171,6 @@ export function TokenBreakdownList({
                   </div>
                 ))}
               </dl>
-            ) : null}
-            {row.key === "input" && breakdown.cacheRows.length > 0 ? (
-              <p className="text-[11px] leading-4 text-muted-foreground/80">
-                口径：输入含缓存读写修正（跨上游语义归一），命中率为缓存读取占有效输入比例
-              </p>
             ) : null}
           </div>
         ))
