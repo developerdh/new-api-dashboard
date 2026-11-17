@@ -24,7 +24,7 @@ new-api-dashcam 的构建、部署、反向代理接入与回滚。设计依据�
 ```bash
 cd dashcam
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -trimpath -ldflags="-s -w -X main.version=v0.1.0" -o new-api-dashcam .
+  go build -trimpath -ldflags="-s -w -X main.version=v0.1.1" -o new-api-dashcam .
 ```
 
 | 产物 | 体积（实测） |
@@ -48,14 +48,14 @@ make image    # 容器镜像
 
 ```bash
 cd dashcam
-docker build --build-arg VERSION=v0.1.0 -t new-api-dashcam:v0.1.0 .
+docker build --build-arg VERSION=v0.1.1 -t new-api-dashcam:v0.1.1 .
 ```
 
 ### 2.4 发布流水线
 
 `.github/workflows/release-dashcam.yml`，由 tag `dashcam-v*` 触发，与看板的 `v*` 流水线互不干扰——两套工具链与发布节奏不同，改前端不连带重发代理（决策依据见 [04-decisions.md](04-decisions.md) D9）。
 
-也支持 `workflow_dispatch` 手动触发：输入版本号（如 `v0.1.0`）即自动创建 `new-api-dashcam-<版本>` tag 并发布，用于补发或重发；版本号须以 `v` 开头。
+也支持 `workflow_dispatch` 手动触发：输入版本号（如 `v0.1.1`）即自动创建 `new-api-dashcam-<版本>` tag 并发布，用于补发或重发；版本号须以 `v` 开头。
 
 | 步骤 | 内容 |
 |---|---|
@@ -67,7 +67,7 @@ docker build --build-arg VERSION=v0.1.0 -t new-api-dashcam:v0.1.0 .
 
 发布包解压即用，不含容器运行时依赖。
 
-版本号三处一致：tag `dashcam-v0.1.0` → Release 名 `dashcam v0.1.0` → 二进制 `-version` 输出 `v0.1.0`。
+版本号三处一致：tag `dashcam-v0.1.1` → Release 名 `dashcam v0.1.1` → 二进制 `-version` 输出 `v0.1.1`。
 
 代理的 Release 说明由 GitHub 自动生成，不更新根目录 `CHANGELOG.md`（后者仅覆盖看板）；代理侧暂无独立 changelog，以 Release 页为准。
 
@@ -179,7 +179,7 @@ docker compose -f docker-compose.example.yml up -d --build
 ```yaml
 services:
   dashcam:
-    image: new-api-dashcam:v0.1.0
+    image: new-api-dashcam:v0.1.1
     volumes: ["./data/dashcam:/app/data/dashcam"]
     ports: ["127.0.0.1:3090:3090"]
     restart: unless-stopped

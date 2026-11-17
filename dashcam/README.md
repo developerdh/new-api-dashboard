@@ -108,7 +108,7 @@ go build -o new-api-dashcam .
 
 # 交叉编译（发布产物即此命令）
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -trimpath -ldflags="-s -w -X main.version=v0.1.0" -o new-api-dashcam .
+  go build -trimpath -ldflags="-s -w -X main.version=v0.1.1" -o new-api-dashcam .
 ```
 
 产物是静态链接单文件（约 6.6 MB），不依赖 libc，也不需要安装 Go 运行时。
@@ -117,7 +117,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 
 ```bash
 # 上下文必须是本目录，不能用仓库根目录
-docker build --build-arg VERSION=v0.1.0 -t new-api-dashcam:v0.1.0 .
+docker build --build-arg VERSION=v0.1.1 -t new-api-dashcam:v0.1.1 .
 ```
 
 或直接用 `docker-compose.example.yml`。
@@ -162,7 +162,7 @@ curl -s http://127.0.0.1:3090/healthz
 ```yaml
 services:
   dashcam:
-    image: new-api-dashcam:v0.1.0
+    image: new-api-dashcam:v0.1.1
     volumes: ["./data/dashcam:/app/data/dashcam"]
     ports: ["127.0.0.1:3090:3090"]
 

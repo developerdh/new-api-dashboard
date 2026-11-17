@@ -7,8 +7,8 @@
 从 GitHub Releases 下载对应平台的发布包（linux/amd64 或 linux/arm64）：
 
 ```bash
-tar -xzf new-api-dashcam_v0.1.0_linux_amd64.tar.gz
-cd new-api-dashcam_v0.1.0_linux_amd64
+tar -xzf new-api-dashcam_v0.1.1_linux_amd64.tar.gz
+cd new-api-dashcam_v0.1.1_linux_amd64
 ```
 
 包内含二进制 `new-api-dashcam`、systemd unit、环境变量样例与 README。需要自行构建时在仓库内执行 `make linux`（输出到 `dist/`）。
@@ -113,7 +113,7 @@ curl -s http://127.0.0.1:3090/healthz
 ```yaml
 services:
   dashcam:
-    image: new-api-dashcam:v0.1.0
+    image: new-api-dashcam:v0.1.1
     volumes: ["./data/dashcam:/app/data/dashcam"]
     ports: ["127.0.0.1:3090:3090"]
     restart: unless-stopped
