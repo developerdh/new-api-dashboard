@@ -19,6 +19,7 @@ import { GranularitySwitch } from "@/components/charts/granularity-switch";
 import { ModelPie } from "@/components/charts/model-pie";
 import { TokenBreakdownList } from "@/components/charts/token-breakdown-list";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
+import { InfoHint } from "@/components/info-hint";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
 import { SectionBody } from "@/components/section-body";
 import { Button } from "@/components/ui/button";
@@ -215,6 +216,10 @@ export function UserClient({ userId }: { userId: string }) {
         <Card className="gap-3 py-5">
           <div className="flex items-center justify-between px-5">
             <h2 className="text-sm font-semibold">Token 构成</h2>
+            <InfoHint
+              label="Token 构成"
+              hint="有效输入 = prompt + 缓存读写修正（anthropic 语义，跨上游归一）；命中率为缓存读取占有效输入比例"
+            />
           </div>
           <div className="px-5 py-2">
             <SectionBody
