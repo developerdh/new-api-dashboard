@@ -81,9 +81,12 @@ export interface TrendLogRow {
   completion_tokens: number;
 }
 
-/** 按粒度平移 k 个桶（day=k 天、week=k 周、month=k 个自然月）。 */
+/** 按粒度平移 k 个桶（hour=k 小时、day=k 天、week=k 周、month=k 个自然月）。 */
 export function shiftBucket(bucket: number, granularity: Granularity, k: number): number {
   switch (granularity) {
+    case "hour":
+      // 东八区无夏令时，小时平移用固定偏移
+      return bucket + k * 3_600;
     case "day":
       return addShanghaiDays(bucket, k);
     case "week":
@@ -110,10 +113,22 @@ export function trendBuckets(start: number, end: number, granularity: Granularit
   return buckets;
 }
 
-/** 桶标签：日/周用自然日，月用 `YYYY-MM`。 */
+const DAY_SECONDS = 86_400;
+
+/** 桶起点的小时（东八区 0–23；调用方保证桶已对齐整点）。 */
+function shanghaiHourOfDay(bucket: number): number {
+  return Math.floor((((bucket % DAY_SECONDS) + 8 * 3_600) % DAY_SECONDS) / 3_600);
+}
+
+/** 桶标签：日/周用自然日，月用 `YYYY-MM`，小时用 `MM-DD HH:00`（跨日可区分）。 */
 export function bucketLabel(bucket: number, granularity: Granularity): string {
   const date = shanghaiDate(bucket);
-  return granularity === "month" ? date.slice(0, 7) : date;
+  if (granularity === "month") return date.slice(0, 7);
+  if (granularity === "hour") {
+    const hour = String(shanghaiHourOfDay(bucket)).padStart(2, "0");
+    return `${date.slice(5)} ${hour}:00`;
+  }
+  return date;
 }
 
 /** 桶起点表达式：东八区桶边界 → 真实 Unix 秒（int8 → number）。 */

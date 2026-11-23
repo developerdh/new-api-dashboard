@@ -18,7 +18,7 @@ export const SNAPSHOT_QUEUE_LIMIT = 3;
 
 const ALLOWED_PATH_PATTERN = /^\/(?:dashboard|models)\/?$|^\/users\/\d+\/?$/;
 const ALLOWED_QUERY_KEYS = new Set(["start", "end", "granularity"]);
-const GRANULARITIES = new Set(["day", "week", "month"]);
+const GRANULARITIES = new Set(["hour", "day", "week", "month"]);
 const MAX_NAME_LENGTH = 64;
 
 export interface SnapshotRequest {
@@ -84,7 +84,7 @@ export function normalizeSnapshotQuery(
     }
     if (key === "granularity" && !GRANULARITIES.has(value)) {
       throw new QueryValidationError([
-        { path: "query", message: "granularity 只允许 day/week/month" },
+        { path: "query", message: "granularity 只允许 hour/day/week/month" },
       ]);
     }
     normalized[key] = value;

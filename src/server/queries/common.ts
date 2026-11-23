@@ -28,8 +28,8 @@ import {
   type QueryIssue,
 } from "@/server/http";
 
-/** 粒度白名单（顺序固定，供 Zod enum 与 UI 复用）。 */
-export const GRANULARITIES = ["day", "week", "month"] as const;
+/** 粒度白名单（顺序固定，供 Zod enum 复用；UI 展示清单见 `lib/time-range`，不含 hour）。 */
+export const GRANULARITIES = ["hour", "day", "week", "month"] as const;
 
 /** 与 `ApiGranularity` 同一联合类型（API 契约层定义，此处别名便于查询层引用）。 */
 export type Granularity = ApiGranularity;
@@ -281,6 +281,12 @@ export function shanghaiDayStart(epochSeconds: number): number {
   return civilToEpochSeconds({ ...parts, hour: 0, minute: 0, second: 0 });
 }
 
+/** 东八区所在自然小时的起点（分、秒归零；小时桶用，对齐 `DATE_TRUNC('hour', …)`）。 */
+export function shanghaiHourStart(epochSeconds: number): number {
+  const parts = shanghaiCivilParts(epochSeconds);
+  return civilToEpochSeconds({ ...parts, minute: 0, second: 0 });
+}
+
 /** 东八区当周周一 00:00:00（与 PG `DATE_TRUNC('week', …)` 一致）。 */
 export function shanghaiWeekStart(epochSeconds: number): number {
   const dayStart = shanghaiDayStart(epochSeconds);
@@ -323,9 +329,11 @@ export function addShanghaiMonths(epochSeconds: number, months: number): number 
   return civilToEpochSeconds({ ...parts, year, month, day });
 }
 
-/** 按粒度取所在桶的起点（day/week/month → 对应 00:00:00）。 */
+/** 按粒度取所在桶的起点（hour → 整点；day/week/month → 对应 00:00:00）。 */
 export function bucketStart(epochSeconds: number, granularity: Granularity): number {
   switch (granularity) {
+    case "hour":
+      return shanghaiHourStart(epochSeconds);
     case "day":
       return shanghaiDayStart(epochSeconds);
     case "week":
@@ -336,11 +344,15 @@ export function bucketStart(epochSeconds: number, granularity: Granularity): num
 }
 
 /**
- * 环比区间：整体按粒度平移一个自然单位（day → 前一天，week → 前 7 天，month → 上一个自然月）。
+ * 环比区间：整体按粒度平移一个自然单位（hour → 前 1 小时，day → 前一天，
+ * week → 前 7 天，month → 上一个自然月）。
  * 注意 month 平移按日历月，起止长度可能不同（2 月 vs 3 月），属预期行为。
  */
 export function prevRange(start: number, end: number, granularity: Granularity): QueryRange {
   switch (granularity) {
+    case "hour":
+      // 东八区无夏令时，小时平移用固定偏移即可
+      return { start: start - 3_600, end: end - 3_600 };
     case "day":
       return { start: addShanghaiDays(start, -1), end: addShanghaiDays(end, -1) };
     case "week":

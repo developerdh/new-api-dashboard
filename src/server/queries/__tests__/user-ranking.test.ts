@@ -201,7 +201,7 @@ describe("resolveRankingParams：limit 缺省/上限", () => {
   it("缺 start / 非法 granularity → 公共件报 400 语义", () => {
     expect(() => resolveRankingParams(url("end=2026-11-11"))).toThrow(QueryValidationError);
     expect(() =>
-      resolveRankingParams(url("start=2026-11-10&end=2026-11-11&granularity=hour")),
+      resolveRankingParams(url("start=2026-11-10&end=2026-11-11&granularity=quarter")),
     ).toThrow(QueryValidationError);
   });
 });

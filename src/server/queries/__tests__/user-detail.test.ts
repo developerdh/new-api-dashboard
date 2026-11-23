@@ -376,9 +376,44 @@ describe("GET /api/users/[id]/trend", () => {
     expect(trendRunner).toHaveBeenCalledTimes(1);
   });
 
+  it("显式 granularity=hour：单日区间返回 24 个小时桶，带 userId 调用执行层", async () => {
+    trendRunner.mockResolvedValue(new Map());
+
+    const response = await getUserTrend(
+      new Request(url("start=2026-11-10&end=2026-11-11&granularity=hour")),
+      ctx(),
+    );
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      data: { points: Array<{ bucketStart: number; label: string }> };
+      meta: { granularity: string | null };
+    };
+    expect(body.data.points).toHaveLength(24);
+    expect(body.data.points[0]?.bucketStart).toBe(T0);
+    expect(body.data.points[0]?.label).toBe("11-10 00:00");
+    expect(body.data.points[23]?.label).toBe("11-10 23:00");
+    expect(body.meta.granularity).toBe("hour");
+    expect(trendRunner).toHaveBeenCalledWith({ start: T0, end: T0 + DAY }, "hour", USER_ID);
+  });
+
+  it("granularity=hour 桶数超过 1000 → 400（issues.path=range，不触达执行层）", async () => {
+    // hour 合法后 1000 桶上限经公共参数可达（约 41.7 天 > 1000 小时）
+    const end = T0 + 1_001 * 3_600;
+    const response = await getUserTrend(
+      new Request(url(`start=2026-11-10&end=${end}&granularity=hour`)),
+      ctx(),
+    );
+    expect(response.status).toBe(400);
+    expect(
+      ((await response.json()) as { error: { issues?: Array<{ path: string }> } }).error.issues?.some(
+        (issue) => issue.path === "range",
+      ),
+    ).toBe(true);
+    expect(trendRunner).not.toHaveBeenCalled();
+  });
+
   it("区间超 366 天共享上限 → 400（不触达执行层）；非法 granularity → 400", async () => {
-    // 桶数上限（1000）在 366 天共享区间上限生效后已不可经公共参数触达
-    // （day 桶 ≤366 个、hour 非合法粒度），保留为服务端纵深防御。
     // 400 天 > 上限 → normalizeQueryParams 直接 400（path=end），执行层不被触达
     const end = new Date((T0 + 400 * DAY) * 1000).toISOString().slice(0, 10);
     const tooLong = await getUserTrend(
@@ -393,7 +428,7 @@ describe("GET /api/users/[id]/trend", () => {
     ).toBe(true);
 
     const badGranularity = await getUserTrend(
-      new Request(url("start=2026-11-10&end=2026-11-11&granularity=hour")),
+      new Request(url("start=2026-11-10&end=2026-11-11&granularity=quarter")),
       ctx(),
     );
     expect(badGranularity.status).toBe(400);

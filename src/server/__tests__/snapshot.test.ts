@@ -106,7 +106,7 @@ describe("路径与 query 白名单（防 SSRF）", () => {
     const invalidQueries: Array<Record<string, string>> = [
       { userId: "7" },
       { start: "2026-11-10" },
-      { granularity: "hour" },
+      { granularity: "year" },
     ];
     for (const query of invalidQueries) {
       expect(() => normalizeSnapshotQuery(query)).toThrow(QueryValidationError);

@@ -76,9 +76,9 @@ describe("实例配置：1GB 上限与分级 TTL（方案 §6.2/§6.3）", () =>
     expect(CACHE_METRICS_INTERVAL_MS).toBe(5 * 60 * 1000);
   });
 
-  it("scope 清单与 TTL 表同源，granularity 白名单为 day/week/month", () => {
+  it("scope 清单与 TTL 表同源，granularity 白名单为 hour/day/week/month", () => {
     expect([...CACHE_SCOPES].sort()).toEqual(Object.keys(CACHE_TTL_MS).sort());
-    expect(CACHE_GRANULARITIES).toEqual(["day", "week", "month"]);
+    expect(CACHE_GRANULARITIES).toEqual(["hour", "day", "week", "month"]);
   });
 
   it("实例按字节计量并保留调用方给定的 maxSize（单测可调小）", () => {
@@ -115,6 +115,12 @@ describe("cacheKey：确定性生成与参数校验（方案 §6.3(2)）", () =>
     ).toBe("overview:day:1760000000:1760086400:all:all");
   });
 
+  it("granularity=hour 生成 hour 段 key（白名单漏改 hour 会抛 CacheError）", () => {
+    expect(cacheKey("overview", { granularity: "hour", start: 1, end: 2 })).toBe(
+      "overview:hour:1:2:all:all",
+    );
+  });
+
   it("时间戳向下取整到秒（毫秒差异不产生新 key）", () => {
     const a = cacheKey("overview", { start: 1_760_000_000.1, end: 1_760_086_400.9 });
     const b = cacheKey("overview", { start: 1_760_000_000, end: 1_760_086_400 });
@@ -146,7 +152,7 @@ describe("cacheKey：确定性生成与参数校验（方案 §6.3(2)）", () =>
       ["start 负值", () => cacheKey("overview", { start: -1, end: 2 })],
       ["start 超范围（毫秒误传）", () => cacheKey("overview", { start: 1_760_000_000_000, end: 2 })],
       ["start > end", () => cacheKey("overview", { start: 10, end: 9 })],
-      ["granularity 非法", () => cacheKey("overview", { granularity: "hour" as never, start: 1, end: 2 })],
+      ["granularity 非法", () => cacheKey("overview", { granularity: "year" as never, start: 1, end: 2 })],
       ["userId 非正整数", () => cacheKey("userTrend", { start: 1, end: 2, userId: 0 })],
       ["userId 小数", () => cacheKey("userTrend", { start: 1, end: 2, userId: 1.5 })],
       ["modelName 为保留值 all", () => cacheKey("modelDist", { start: 1, end: 2, modelName: "all" })],
