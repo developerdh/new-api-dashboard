@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * 全局总览页客户端聚合：指标卡 → 沉默用户清单卡 → 排行 / 热力图 → 趋势。
+ * 全局总览页客户端聚合：指标卡 → 沉默用户清单卡 → 排行 / 热力图 → 分布 / 趋势。
  *
  * - 时间范围与粒度只读 URL（`start`/`end`/`granularity`）；筛选器放在标题下方，与其它页一致；
  * - 数据获取统一走 `useApi`，每块独立 loading/error/空数据三态；
- * - 趋势 / 排行 / 热力图各有独立的统计维度切换（消耗额度 / 请求数 / Token）；
+ * - 趋势 / 排行 / 热力图 / 消耗分布各有独立的统计维度切换（消耗额度 / 请求数 / Token）；
+ * - 消耗分布与趋势并排：分桶单位按区间跨度自动选择（`distributionGranularity`），
+ *   不读不写 URL `granularity`（该参数专属趋势卡粒度开关）；
  * - 用户排行弹窗为受控 Dialog，「查看全部」与指标卡里的活跃用户数共用同一入口；
  * - 热力图固定近半年，不随全局区间变化。
  */
@@ -17,6 +19,7 @@ import { InactiveUsersCard } from "@/components/cards/inactive-users-card";
 import { OverviewCards, type DeltaMetric } from "@/components/cards/overview-cards";
 import { CalendarHeatmap } from "@/components/charts/calendar-heatmap";
 import { ChartExportButton } from "@/components/charts/chart-export-button";
+import { ConsumptionBar, formatDistributionTotal } from "@/components/charts/consumption-bar";
 import { GranularitySwitch } from "@/components/charts/granularity-switch";
 import { MetricSwitch } from "@/components/charts/metric-switch";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
@@ -41,12 +44,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCompactNumber, formatNumber, formatQuota } from "@/lib/format";
-import { primaryUserLabel, secondaryUserLabel } from "@/lib/user-label";
 import {
+  DISTRIBUTION_UNIT_LABELS,
+  distributionGranularity,
   lastNDaysRange,
+  nowEpochSeconds,
   parseGranularity,
   resolveRangeFromParams,
 } from "@/lib/time-range";
+import { primaryUserLabel, secondaryUserLabel } from "@/lib/user-label";
 import { useApi } from "@/lib/use-api";
 import type { InactiveUserRow, InactiveUsersSnapshot } from "@/server/queries/inactive";
 import type { OverviewSnapshot } from "@/server/queries/overview";
@@ -79,6 +85,7 @@ export function OverviewClient() {
   const granularity = parseGranularity(searchParams.get("granularity"));
   const granularityParam = searchParams.get("granularity");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("totalQuota");
+  const [distributionMetric, setDistributionMetric] = useState<TrendMetric>("totalQuota");
   const [rankingMetric, setRankingMetric] = useState<TrendMetric>("totalQuota");
   const [heatMetric, setHeatMetric] = useState<TrendMetric>("totalQuota");
   const [compare, setCompare] = useState<"prev" | "yoy">("prev");
@@ -93,6 +100,12 @@ export function OverviewClient() {
   const dailyTrendApi = useApi<TrendSeries>(
     `/api/trend?${query}&granularity=day&compare=${compare}`,
   );
+  // 消耗分布：分桶单位按区间跨度自动选择，与趋势卡的 URL 粒度互不影响
+  const distributionUnit = useMemo(() => distributionGranularity(range), [range]);
+  const distributionApi = useApi<TrendSeries>(`/api/trend?${query}&granularity=${distributionUnit}`);
+  // 「未到」判定基准：切区间时刷新（页面停留期间不自动轮询，与其它卡一致）
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 故意依赖区间：换区间时重取 now，避免把已发生小时误判为未来
+  const nowSeconds = useMemo(() => nowEpochSeconds(), [range.start, range.end]);
   const rankingApi = useApi<{ rows: UserRankingRow[] }>(
     `/api/users/ranking?${query}&limit=${RANKING_FETCH_LIMIT}`,
   );
@@ -109,6 +122,15 @@ export function OverviewClient() {
   const dailyPoints = useMemo(
     () => dailyTrendApi.data?.points ?? [],
     [dailyTrendApi.data?.points],
+  );
+  const distributionPoints = useMemo(
+    () => distributionApi.data?.points ?? [],
+    [distributionApi.data?.points],
+  );
+  // 区间总计：未来小时的服务端值为 0，求和天然只累计已发生数据
+  const distributionTotal = useMemo(
+    () => distributionPoints.reduce((total, point) => total + point[distributionMetric], 0),
+    [distributionMetric, distributionPoints],
   );
   const compareLabel = compare === "prev" ? "较上期" : "较去年同期";
   const deltas = useMemo<Partial<Record<DeltaMetric, number>>>(() => {
@@ -272,48 +294,96 @@ export function OverviewClient() {
           </Card>
         </div>
 
-        <Card className="gap-3 py-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5">
-            <div className="flex flex-col gap-0.5">
-              <h2 className="text-sm font-semibold">消耗趋势</h2>
-              <p className="text-[11px] text-muted-foreground">
-                按所选粒度聚合，支持环比 / 同比对照
-              </p>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="gap-3 py-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-5">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">
+                  消耗分布
+                  <span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground">
+                    总计{" "}
+                    {distributionApi.data === undefined
+                      ? "—"
+                      : formatDistributionTotal(distributionMetric, distributionTotal)}
+                  </span>
+                </h2>
+                <p className="text-[11px] text-muted-foreground">
+                  按{DISTRIBUTION_UNIT_LABELS[distributionUnit]}分桶 · 东八区；额度取 quota_data（≤5
+                  分钟延迟）
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <MetricSwitch
+                  options={TREND_METRICS}
+                  value={distributionMetric}
+                  onChange={setDistributionMetric}
+                  label="分布统计维度"
+                />
+                <ChartExportButton exportName="overview-distribution" title="消耗分布" />
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <MetricSwitch
-                options={TREND_METRICS}
-                value={trendMetric}
-                onChange={setTrendMetric}
-                label="趋势统计维度"
-              />
-              <GranularitySwitch />
-              <MetricSwitch
-                options={COMPARE_OPTIONS}
-                value={compare}
-                onChange={setCompare}
-                label="对比方式"
-              />
-              <ChartExportButton exportName="dashboard-trend" title="消耗趋势" />
+            <div className="px-5">
+              <SectionBody
+                loading={distributionApi.loading}
+                error={distributionApi.error}
+                onRetry={distributionApi.refresh}
+                skeletonHeight={300}
+              >
+                <ConsumptionBar
+                  points={distributionPoints}
+                  unit={distributionUnit}
+                  metric={distributionMetric}
+                  nowSeconds={nowSeconds}
+                  height={300}
+                  exportName="overview-distribution"
+                />
+              </SectionBody>
             </div>
-          </div>
-          <div className="px-5">
-            <SectionBody
-              loading={trendApi.loading}
-              error={trendApi.error}
-              onRetry={trendApi.refresh}
-              skeletonHeight={300}
-            >
-              <TrendLine
-                points={trendPoints}
-                comparePoints={trendApi.data?.compareSeries}
-                metric={trendMetric}
-                height={300}
-                exportName="dashboard-trend"
-              />
-            </SectionBody>
-          </div>
-        </Card>
+          </Card>
+
+          <Card className="gap-3 py-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">消耗趋势</h2>
+                <p className="text-[11px] text-muted-foreground">
+                  按所选粒度聚合，支持环比 / 同比对照
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <MetricSwitch
+                  options={TREND_METRICS}
+                  value={trendMetric}
+                  onChange={setTrendMetric}
+                  label="趋势统计维度"
+                />
+                <GranularitySwitch />
+                <MetricSwitch
+                  options={COMPARE_OPTIONS}
+                  value={compare}
+                  onChange={setCompare}
+                  label="对比方式"
+                />
+                <ChartExportButton exportName="dashboard-trend" title="消耗趋势" />
+              </div>
+            </div>
+            <div className="px-5">
+              <SectionBody
+                loading={trendApi.loading}
+                error={trendApi.error}
+                onRetry={trendApi.refresh}
+                skeletonHeight={300}
+              >
+                <TrendLine
+                  points={trendPoints}
+                  comparePoints={trendApi.data?.compareSeries}
+                  metric={trendMetric}
+                  height={300}
+                  exportName="dashboard-trend"
+                />
+              </SectionBody>
+            </div>
+          </Card>
+        </div>
 
         <DialogContent data-testid="overview-ranking-dialog" className="sm:max-w-3xl">
           <DialogHeader>

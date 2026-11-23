@@ -5,6 +5,7 @@ import {
   DAY_SECONDS,
   GRANULARITIES,
   PRESETS,
+  distributionGranularity,
   lastNDaysRange,
   parseEpochSeconds,
   parseGranularity,
@@ -84,7 +85,44 @@ describe("URL 参数解析", () => {
 
     expect(parseGranularity("week")).toBe("week");
     expect(parseGranularity("month")).toBe("month");
-    expect(parseGranularity("hour")).toBe("day");
+    expect(parseGranularity("hour")).toBe("hour");
+    expect(parseGranularity("quarter")).toBe("day");
     expect(parseGranularity(null)).toBe("day");
+  });
+});
+
+describe("消耗分布分桶（distributionGranularity）", () => {
+  it("1/2 个自然日 → hour，3 日 → day", () => {
+    // 今日区间（NOW 当天 0 点到次日 0 点）
+    expect(distributionGranularity({ start: TODAY_START, end: TODAY_START + DAY_SECONDS })).toBe(
+      "hour",
+    );
+    // 两日
+    expect(
+      distributionGranularity({ start: TODAY_START - DAY_SECONDS, end: TODAY_START + DAY_SECONDS }),
+    ).toBe("hour");
+    // 三日
+    expect(
+      distributionGranularity({ start: TODAY_START - 2 * DAY_SECONDS, end: TODAY_START + DAY_SECONDS }),
+    ).toBe("day");
+  });
+
+  it("非整日起点按覆盖的自然日数计算", () => {
+    // start 落在昨日 12:00、end 为今日 12:00 → 覆盖 2 个自然日 → hour
+    expect(
+      distributionGranularity({
+        start: TODAY_START - DAY_SECONDS / 2,
+        end: TODAY_START + DAY_SECONDS / 2,
+      }),
+    ).toBe("hour");
+  });
+
+  it("92 个自然日 → day，93 个自然日 → week", () => {
+    const end = TODAY_START + DAY_SECONDS;
+    expect(distributionGranularity({ start: end - 92 * DAY_SECONDS, end })).toBe("day");
+    expect(distributionGranularity({ start: end - 93 * DAY_SECONDS, end })).toBe("week");
+    // 近 30 天预设 → day；自定义半年 → week
+    expect(distributionGranularity(presetRange("30d", NOW))).toBe("day");
+    expect(distributionGranularity({ start: NOV1 - 184 * DAY_SECONDS, end })).toBe("week");
   });
 });

@@ -1,10 +1,12 @@
 "use client";
 
 /**
- * 单用户详情客户端：总览卡 / 趋势 / 模型分布 / Token 占比 / 活跃热力图 / 最近记录。
+ * 单用户详情客户端：总览卡 / 模型分布 / Token 占比 / 活跃热力图 / 最近记录 / 分布 | 趋势。
  *
  * - 时间范围与粒度继承 URL（排行跳转时透传 start/end，另带 username + name 供标题即时展示）；
  * - 标题昵称优先、账号作次要信息；直接访问无 URL 名称时由 overview 返回的 users 身份补齐；
+ * - 消耗分布与使用趋势并排：分桶单位按区间跨度自动选择（`distributionGranularity`），
+ *   不读不写 URL `granularity`（该参数专属趋势卡粒度开关）；
  * - 非法 id（后端 400 issues.path=id）显示错误态；区间内请求数为 0 时显示空态提示（与全 0 区分）。
  */
 import { Download } from "lucide-react";
@@ -15,7 +17,9 @@ import { useMemo, useState } from "react";
 import { MetricCard } from "@/components/cards/MetricCard";
 import { CalendarHeatmap } from "@/components/charts/calendar-heatmap";
 import { ChartExportButton } from "@/components/charts/chart-export-button";
+import { ConsumptionBar, formatDistributionTotal } from "@/components/charts/consumption-bar";
 import { GranularitySwitch } from "@/components/charts/granularity-switch";
+import { MetricSwitch } from "@/components/charts/metric-switch";
 import { ModelPie } from "@/components/charts/model-pie";
 import { TokenBreakdownList } from "@/components/charts/token-breakdown-list";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
@@ -38,7 +42,14 @@ import {
   formatNumber,
   formatQuota,
 } from "@/lib/format";
-import { lastNDaysRange, parseGranularity, resolveRangeFromParams } from "@/lib/time-range";
+import {
+  DISTRIBUTION_UNIT_LABELS,
+  distributionGranularity,
+  lastNDaysRange,
+  nowEpochSeconds,
+  parseGranularity,
+  resolveRangeFromParams,
+} from "@/lib/time-range";
 import { useApi } from "@/lib/use-api";
 import { primaryUserLabel, secondaryUserLabel } from "@/lib/user-label";
 import type { UserOverviewSnapshot } from "@/server/queries/user";
@@ -61,6 +72,7 @@ export function UserClient({ userId }: { userId: string }) {
   const urlDisplayName = searchParams.get("name");
 
   const [metric, setMetric] = useState<TrendMetric>("totalQuota");
+  const [distributionMetric, setDistributionMetric] = useState<TrendMetric>("totalQuota");
   const [recentPage, setRecentPage] = useState(0);
 
   const query = `start=${range.start}&end=${range.end}`;
@@ -69,6 +81,14 @@ export function UserClient({ userId }: { userId: string }) {
   const trendApi = useApi<TrendSeries>(
     `${basePath}/trend?${query}&granularity=${granularity}`,
   );
+  // 消耗分布：分桶单位按区间跨度自动选择，与趋势卡的 URL 粒度互不影响
+  const distributionUnit = useMemo(() => distributionGranularity(range), [range]);
+  const distributionApi = useApi<TrendSeries>(
+    `${basePath}/trend?${query}&granularity=${distributionUnit}`,
+  );
+  // 「未到」判定基准：切区间时刷新（页面停留期间不自动轮询，与其它卡一致）
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 故意依赖区间：换区间时重取 now，避免把已发生小时误判为未来
+  const nowSeconds = useMemo(() => nowEpochSeconds(), [range.start, range.end]);
   const modelsApi = useApi<{ models: UserModelRow[]; recent: UserRecentRow[] }>(
     `${basePath}/models?${query}`,
   );
@@ -90,6 +110,16 @@ export function UserClient({ userId }: { userId: string }) {
   const pageCount = Math.max(1, Math.ceil(recent.length / RECENT_PAGE_SIZE));
   const safePage = Math.min(recentPage, pageCount - 1);
   const pageRows = recent.slice(safePage * RECENT_PAGE_SIZE, (safePage + 1) * RECENT_PAGE_SIZE);
+
+  const distributionPoints = useMemo(
+    () => distributionApi.data?.points ?? [],
+    [distributionApi.data?.points],
+  );
+  // 区间总计：未来小时的服务端值为 0，求和天然只累计已发生数据
+  const distributionTotal = useMemo(
+    () => distributionPoints.reduce((total, point) => total + point[distributionMetric], 0),
+    [distributionMetric, distributionPoints],
+  );
 
   const granularityParam = searchParams.get("granularity");
   const backHref = `/dashboard?${query}${
@@ -353,44 +383,92 @@ export function UserClient({ userId }: { userId: string }) {
         </div>
       </Card>
 
-      <Card className="gap-3 py-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5">
-          <h2 className="text-sm font-semibold">使用趋势</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <GranularitySwitch />
-            <div className="flex items-center gap-1" role="group" aria-label="趋势指标">
-              {TREND_METRICS.map((item) => (
-                <Button
-                  key={item.key}
-                  type="button"
-                  size="sm"
-                  variant={metric === item.key ? "secondary" : "ghost"}
-                  aria-pressed={metric === item.key}
-                  onClick={() => setMetric(item.key)}
-                >
-                  {item.label}
-                </Button>
-              ))}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="gap-3 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5">
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-sm font-semibold">
+                消耗分布
+                <span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground">
+                  总计{" "}
+                  {distributionApi.data === undefined
+                    ? "—"
+                    : formatDistributionTotal(distributionMetric, distributionTotal)}
+                </span>
+              </h2>
+              <p className="text-[11px] text-muted-foreground">
+                按{DISTRIBUTION_UNIT_LABELS[distributionUnit]}分桶 · 东八区；额度取 quota_data（≤5
+                分钟延迟）
+              </p>
             </div>
-            <ChartExportButton exportName="user-trend" title="使用趋势" />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <MetricSwitch
+                options={TREND_METRICS}
+                value={distributionMetric}
+                onChange={setDistributionMetric}
+                label="分布统计维度"
+              />
+              <ChartExportButton exportName="user-distribution" title="消耗分布" />
+            </div>
           </div>
-        </div>
-        <div className="px-5">
-          <SectionBody
-            loading={trendApi.loading}
-            error={trendApi.error}
-            onRetry={trendApi.refresh}
-            skeletonHeight={280}
-          >
-            <TrendLine
-              points={trendApi.data?.points ?? []}
-              metric={metric}
-              height={280}
-              exportName="user-trend"
-            />
-          </SectionBody>
-        </div>
-      </Card>
+          <div className="px-5">
+            <SectionBody
+              loading={distributionApi.loading}
+              error={distributionApi.error}
+              onRetry={distributionApi.refresh}
+              skeletonHeight={280}
+            >
+              <ConsumptionBar
+                points={distributionPoints}
+                unit={distributionUnit}
+                metric={distributionMetric}
+                nowSeconds={nowSeconds}
+                height={280}
+                exportName="user-distribution"
+              />
+            </SectionBody>
+          </div>
+        </Card>
+
+        <Card className="gap-3 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5">
+            <h2 className="text-sm font-semibold">使用趋势</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <GranularitySwitch />
+              <div className="flex items-center gap-1" role="group" aria-label="趋势指标">
+                {TREND_METRICS.map((item) => (
+                  <Button
+                    key={item.key}
+                    type="button"
+                    size="sm"
+                    variant={metric === item.key ? "secondary" : "ghost"}
+                    aria-pressed={metric === item.key}
+                    onClick={() => setMetric(item.key)}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+              <ChartExportButton exportName="user-trend" title="使用趋势" />
+            </div>
+          </div>
+          <div className="px-5">
+            <SectionBody
+              loading={trendApi.loading}
+              error={trendApi.error}
+              onRetry={trendApi.refresh}
+              skeletonHeight={280}
+            >
+              <TrendLine
+                points={trendApi.data?.points ?? []}
+                metric={metric}
+                height={280}
+                exportName="user-trend"
+              />
+            </SectionBody>
+          </div>
+        </Card>
+      </div>
     </main>
   );
 }
