@@ -7,7 +7,12 @@
 export const DAY_SECONDS = 86_400;
 export const SHANGHAI_OFFSET_SECONDS = 8 * 3_600;
 
-export type Granularity = "day" | "week" | "month";
+/**
+ * 趋势分桶粒度（与服务端 `ApiGranularity` 一致）。
+ * `hour` 仅由消耗分布卡的服务端查询消费，不进 `GRANULARITIES` 展示清单
+ * （趋势卡的粒度开关仍只有 日/周/月）。
+ */
+export type Granularity = "hour" | "day" | "week" | "month";
 
 export interface TimeRange {
   start: number;
@@ -31,6 +36,11 @@ export const GRANULARITIES: ReadonlyArray<{ key: Granularity; label: string }> =
   { key: "week", label: "周" },
   { key: "month", label: "月" },
 ];
+
+/** 当前时刻（Unix 秒）。模块函数封装以便组件在 useMemo 内取时（直调 Date.now 会触发 purity 规则）。 */
+export function nowEpochSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
 
 /** 东八区当日 00:00:00（Unix 秒）。 */
 export function shanghaiDayStart(epochSeconds: number): number {
@@ -112,6 +122,41 @@ export function lastNDaysRange(
   return { start: today.start - (days - 1) * DAY_SECONDS, end: today.end };
 }
 
+/* ------------------------------------------------------------------ */
+/* 消耗分布分桶（消耗分布卡专用，不进趋势粒度开关）                     */
+/* ------------------------------------------------------------------ */
+
+/** 消耗分布卡的分桶单位（比趋势粒度少 month：长区间直接按周）。 */
+export type DistributionBucket = "hour" | "day" | "week";
+
+/** 消耗分布分桶阈值（东八区自然日数）：≤2 日按小时。 */
+export const DISTRIBUTION_HOUR_MAX_DAYS = 2;
+
+/** 消耗分布分桶阈值（东八区自然日数）：≤92 日（约 3 个自然月）按天。 */
+export const DISTRIBUTION_DAY_MAX_DAYS = 92;
+
+/** 分桶单位的展示名（卡片副标题用）。 */
+export const DISTRIBUTION_UNIT_LABELS: Record<DistributionBucket, string> = {
+  hour: "小时",
+  day: "天",
+  week: "周",
+};
+
+/**
+ * 消耗分布卡的分桶单位：按区间覆盖的东八区自然日数选择。
+ * - ≤2 日 → hour（单日 24 桶 / 两日 48 桶，远低于服务端 1000 桶上限）；
+ * - ≤92 日 → day（半宽卡内 ~90 根日柱仍可读）；
+ * - 更长 → week（366 天区间上限下 ≤53 桶）。
+ * 只读区间、不读不写 URL `granularity`（趋势卡粒度开关不受影响）。
+ */
+export function distributionGranularity(range: TimeRange): DistributionBucket {
+  const days =
+    Math.floor((shanghaiDayStart(range.end - 1) - shanghaiDayStart(range.start)) / DAY_SECONDS) + 1;
+  if (days <= DISTRIBUTION_HOUR_MAX_DAYS) return "hour";
+  if (days <= DISTRIBUTION_DAY_MAX_DAYS) return "day";
+  return "week";
+}
+
 /** URL 参数 → 整数 Unix 秒；非法返回 null。 */
 export function parseEpochSeconds(value: string | null): number | null {
   if (value === null || !/^\d+$/.test(value)) return null;
@@ -121,7 +166,8 @@ export function parseEpochSeconds(value: string | null): number | null {
 
 /** URL 参数 → 粒度；缺省/非法回退 day（与后端 schema 一致）。 */
 export function parseGranularity(value: string | null): Granularity {
-  return value === "week" || value === "month" ? value : "day";
+  if (value === "hour" || value === "week" || value === "month") return value;
+  return "day";
 }
 
 /** URL 参数 → 区间；缺省回退 `DEFAULT_RANGE_PRESET`（不写回 URL，由选择器负责写入）。 */

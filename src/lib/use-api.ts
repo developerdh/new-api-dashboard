@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export interface ApiMetaPayload {
   range: { start: number; end: number };
-  granularity: "day" | "week" | "month" | null;
+  granularity: "hour" | "day" | "week" | "month" | null;
   cached: boolean;
   source?: string;
 }
