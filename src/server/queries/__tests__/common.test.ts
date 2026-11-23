@@ -101,6 +101,11 @@ describe("normalizeQueryParams：归一化与校验", () => {
     expect(params.modelName).toBeUndefined();
   });
 
+  it("granularity=hour 合法（枚举贯通后进入白名单）", () => {
+    const params = normalizeQueryParams({ start: T_DAY, end: T_NEXT_DAY, granularity: "hour" });
+    expect(params.granularity).toBe("hour");
+  });
+
   it("接受 URLSearchParams 与普通对象两种入口", () => {
     const fromSearch = normalizeQueryParams(
       new URLSearchParams("start=2026-11-10&end=2026-11-11&granularity=week&limit=50"),
@@ -142,7 +147,7 @@ describe("normalizeQueryParams：归一化与校验", () => {
       ["时间格式非法", { start: "abc", end: T_NEXT_DAY }, "start"],
       ["end <= start", { start: T_NEXT_DAY, end: T_DAY }, "end"],
       ["end == start", { start: T_DAY, end: T_DAY }, "end"],
-      ["granularity 非法", { start: T_DAY, end: T_NEXT_DAY, granularity: "hour" }, "granularity"],
+      ["granularity 非法", { start: T_DAY, end: T_NEXT_DAY, granularity: "quarter" }, "granularity"],
       ["userId 非数字", { start: T_DAY, end: T_NEXT_DAY, userId: "abc" }, "userId"],
       ["userId 为 0", { start: T_DAY, end: T_NEXT_DAY, userId: 0 }, "userId"],
       ["userId 小数", { start: T_DAY, end: T_NEXT_DAY, userId: 1.5 }, "userId"],
@@ -241,6 +246,9 @@ describe("Asia/Shanghai 时间边界（方案 §5 口径）", () => {
     expect(bucketStart(T_DAY_END, "day")).toBe(T_DAY);
     expect(bucketStart(T_DAY_END, "week")).toBe(T_MONDAY);
     expect(bucketStart(T_DAY_END, "month")).toBe(T_MONTH_START);
+    // hour：桶起点为所在自然小时的整点（分、秒归零）
+    expect(bucketStart(T_DAY_END, "hour")).toBe(T_DAY + 23 * 3_600);
+    expect(bucketStart(T_DAY + 5 * 3_600 + 123, "hour")).toBe(T_DAY + 5 * 3_600);
   });
 
   it("自然日 / 自然月平移（含月末钳制）", () => {
@@ -255,9 +263,13 @@ describe("Asia/Shanghai 时间边界（方案 §5 口径）", () => {
 });
 
 describe("环比 / 同比区间（§3.2）", () => {
-  it("day 平移 1 天、week 平移 7 天", () => {
+  it("day 平移 1 天、week 平移 7 天、hour 平移 1 小时", () => {
     expect(prevRange(T_DAY, T_NEXT_DAY, "day")).toEqual({ start: T_DAY - DAY, end: T_DAY });
     expect(prevRange(T_DAY, T_NEXT_DAY, "week")).toEqual({ start: T_DAY - 7 * DAY, end: T_NEXT_DAY - 7 * DAY });
+    expect(prevRange(T_DAY, T_NEXT_DAY, "hour")).toEqual({
+      start: T_DAY - 3_600,
+      end: T_NEXT_DAY - 3_600,
+    });
   });
 
   it("month 按自然月平移（11 月 → 10 月）", () => {

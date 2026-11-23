@@ -39,11 +39,11 @@ export const CACHE_TTL_MS = {
 
 export type CacheScope = keyof typeof CACHE_TTL_MS;
 
-export type CacheGranularity = "day" | "week" | "month";
+export type CacheGranularity = "hour" | "day" | "week" | "month";
 
 export const CACHE_SCOPES = Object.keys(CACHE_TTL_MS) as readonly CacheScope[];
 
-export const CACHE_GRANULARITIES: readonly CacheGranularity[] = ["day", "week", "month"];
+export const CACHE_GRANULARITIES: readonly CacheGranularity[] = ["hour", "day", "week", "month"];
 
 /** 未指定参数时写入 key 的占位值（与方案 §6.3(2) 的 `?? 'all'` 一致）。 */
 const ALL = "all";

@@ -10,8 +10,8 @@
  */
 import { z } from "zod";
 
-/** 粒度：方案 §4 的 day / week / month（API 契约层定义，查询层复用）。 */
-export type ApiGranularity = "day" | "week" | "month";
+/** 粒度：方案 §4 的 hour / day / week / month（API 契约层定义，查询层复用）。 */
+export type ApiGranularity = "hour" | "day" | "week" | "month";
 
 /** 参数问题（Zod flatten 后的字段级/表单级错误）。 */
 export interface QueryIssue {

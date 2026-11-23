@@ -67,7 +67,10 @@ const emptyRow: TrendBucketData = {
   activeUsers: 0,
 };
 
-function point(bucketStart: number, granularity: "day" | "week" | "month" = "day"): TrendPoint {
+function point(
+  bucketStart: number,
+  granularity: "hour" | "day" | "week" | "month" = "day",
+): TrendPoint {
   return {
     bucketStart,
     label: bucketLabel(bucketStart, granularity),
@@ -124,26 +127,39 @@ describe("桶序列（Asia/Shanghai 边界）", () => {
     expect(trendBuckets(NOV1, JAN1_2027, "month")).toEqual([NOV1, DEC1]);
   });
 
+  it("hour：按自然小时枚举，首桶对齐整点、end 排他含 23:00 桶", () => {
+    const buckets = trendBuckets(T0, T0 + DAY, "hour");
+    expect(buckets).toHaveLength(24);
+    expect(buckets[0]).toBe(T0);
+    expect(buckets[23]).toBe(T0 + 23 * 3_600);
+    // start 落在半小时也归所在整点桶
+    expect(trendBuckets(T0 + 1_800, T0 + DAY, "hour")[0]).toBe(T0);
+  });
+
   it("空区间返回空数组", () => {
     expect(trendBuckets(T0, T0, "day")).toEqual([]);
     expect(trendBuckets(T1, T0, "day")).toEqual([]);
   });
 
-  it("桶标签：日/周为 YYYY-MM-DD，月为 YYYY-MM", () => {
+  it("桶标签：日/周为 YYYY-MM-DD，月为 YYYY-MM，小时为 MM-DD HH:00", () => {
     expect(bucketLabel(T0, "day")).toBe("2026-11-10");
     expect(bucketLabel(NOV9, "week")).toBe("2026-11-09");
     expect(bucketLabel(NOV1, "month")).toBe("2026-11");
+    expect(bucketLabel(T0 + 8 * 3_600, "hour")).toBe("11-10 08:00");
+    expect(bucketLabel(T0 + 23 * 3_600, "hour")).toBe("11-10 23:00");
   });
 
   it("shiftBucket 按粒度平移", () => {
     expect(shiftBucket(T0, "day", 1)).toBe(T1);
     expect(shiftBucket(T0, "week", 1)).toBe(T0 + 7 * DAY);
     expect(bucketLabel(shiftBucket(NOV1, "month", 1), "month")).toBe("2026-12");
+    expect(shiftBucket(T0 + 8 * 3_600, "hour", 3)).toBe(T0 + 11 * 3_600);
+    expect(shiftBucket(T0 + 3_600, "hour", -1)).toBe(T0);
   });
 });
 
-describe("三粒度 SQL 编译（§5.2–§5.4）", () => {
-  for (const granularity of ["day", "week", "month"] as const) {
+describe("四粒度 SQL 编译（§5.2–§5.4 + hour）", () => {
+  for (const granularity of ["hour", "day", "week", "month"] as const) {
     it(`${granularity}：DATE_TRUNC + 东八区 + 按桶分组，区间参数化`, () => {
       const quota = buildTrendQuotaQuery(db, { start: T0, end: T1 }, granularity).compile();
       const logs = buildTrendRequestQuery(db, { start: T0, end: T1 }, granularity).compile();
@@ -305,7 +321,7 @@ describe("trend 参数解析与上限", () => {
 
   it("granularity 非法 → QueryValidationError（公共件校验）", () => {
     expect(() =>
-      resolveTrendParams(url("start=2026-11-10&end=2026-11-11&granularity=hour")),
+      resolveTrendParams(url("start=2026-11-10&end=2026-11-11&granularity=quarter")),
     ).toThrow(QueryValidationError);
   });
 
@@ -470,6 +486,34 @@ describe("GET /api/trend：响应与错误格式", () => {
     const end = T0 + (MAX_TREND_BUCKETS + 1) * DAY;
     const response = await GET(
       new Request(url(`start=2026-11-10&end=${end}&granularity=day`)),
+    );
+    expect(response.status).toBe(400);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("granularity=hour：单日区间返回 24 个小时桶，meta.granularity=hour", async () => {
+    runner.mockResolvedValue(new Map());
+
+    const response = await GET(
+      new Request(url("start=2026-11-10&end=2026-11-11&granularity=hour")),
+    );
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      data: { points: TrendPoint[] };
+      meta: { granularity: string | null };
+    };
+    expect(body.data.points).toHaveLength(24);
+    expect(body.data.points[0]?.bucketStart).toBe(T0);
+    expect(body.data.points[0]?.label).toBe("11-10 00:00");
+    expect(body.data.points[23]?.label).toBe("11-10 23:00");
+    expect(body.meta.granularity).toBe("hour");
+  });
+
+  it("granularity=hour 桶数超限 → 400（约 41.7 天即超 1000 小时桶）", async () => {
+    const end = T0 + (MAX_TREND_BUCKETS + 1) * 3_600;
+    const response = await GET(
+      new Request(url(`start=2026-11-10&end=${end}&granularity=hour`)),
     );
     expect(response.status).toBe(400);
     expect(runner).not.toHaveBeenCalled();
