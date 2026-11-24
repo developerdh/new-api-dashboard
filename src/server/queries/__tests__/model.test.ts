@@ -140,6 +140,18 @@ describe("模型统计 SQL 编译口径", () => {
     expect(compiled.parameters).toEqual([T0, T1, 10]);
   });
 
+  it("userId 过滤：Top 模型与桶聚合均追加 user_id 参数化条件", () => {
+    const top = buildTopModelsQuery(db, { start: T0, end: T1 }, 10, 7).compile();
+    const quota = buildModelTrendQuotaQuery(db, { start: T0, end: T1 }, "hour", ["gpt-4o"], 7).compile();
+    const logs = buildModelTrendRequestQuery(db, { start: T0, end: T1 }, "hour", ["gpt-4o"], 7).compile();
+
+    for (const compiled of [top, quota, logs]) {
+      expect(compiled.sql).toMatch(/"user_id" = \$\d+/);
+      expect(compiled.parameters).toContain(7);
+    }
+    expect(quota.sql).toContain("DATE_TRUNC('hour'");
+  });
+
   it("cross 矩阵：user_id × model_name 双 IN + 分组", () => {
     const compiled = buildModelCrossMatrixQuery(
       db,
@@ -375,7 +387,12 @@ describe("GET /api/models/trend", () => {
     expect(body.data.series[0]?.modelName).toBe("gpt-4o");
     expect(body.data.series[0]?.points).toHaveLength(2);
     expect(body.meta.granularity).toBe("day");
-    expect(trendRunner).toHaveBeenCalledWith({ start: T0, end: T0 + 2 * DAY }, "day", undefined);
+    expect(trendRunner).toHaveBeenCalledWith(
+      { start: T0, end: T0 + 2 * DAY },
+      "day",
+      undefined,
+      undefined,
+    );
   });
 
   it("models 过滤生效（逗号分隔 → 数组）", async () => {
@@ -386,7 +403,18 @@ describe("GET /api/models/trend", () => {
     expect(trendRunner).toHaveBeenCalledWith({ start: T0, end: T1 }, "day", [
       "gpt-4o",
       "claude",
-    ]);
+    ], undefined);
+  });
+
+  it("userId 过滤透传（用户详情按模型分布复用），不同 userId 缓存独立", async () => {
+    trendRunner.mockResolvedValue({ series: [] });
+
+    await getTrend(new Request(url("start=2026-11-10&end=2026-11-11&userId=7")));
+    expect(trendRunner).toHaveBeenCalledWith({ start: T0, end: T1 }, "day", undefined, 7);
+
+    // 换 userId → 不同缓存 key → 执行层再次被调用
+    await getTrend(new Request(url("start=2026-11-10&end=2026-11-11&userId=8")));
+    expect(trendRunner).toHaveBeenCalledTimes(2);
   });
 
   it("models 非法/超限 → 400；桶数超限 → 400", async () => {

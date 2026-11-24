@@ -6,6 +6,7 @@
  * - usersRanking  → 用户消耗排行（userId/昵称/账号/quota/token/请求数）
  * - trend         → 全局趋势桶序列（桶起点/标签/消耗/Token/请求数）
  * - modelsRanking → 模型消耗排行（模型/消耗/Token/请求数/单次平均成本）
+ * - modelsTrend   → 模型 × 桶明细（消耗分布卡数据：桶起点/标签/模型/消耗/Token/请求数；可选 userId）
  * - userModels    → 单用户模型分布（模型/消耗/Token 拆分/占比，必须带 userId）
  *
  * CSV：UTF-8 BOM（Excel 兼容）、引号/逗号/换行转义、英文表头、流式输出。
@@ -22,7 +23,9 @@ import {
 import {
   MODEL_RANKING_MAX_LIMIT,
   runModelRankingQuery,
+  runModelTrendQuery,
   type ModelRankingRow,
+  type ModelTrendSeries,
 } from "@/server/queries/model";
 import { runUserModelsQuery, type UserModelRow, type UserRankingRow } from "@/server/queries/user";
 import type { TrendPoint } from "@/server/queries/trend";
@@ -32,6 +35,7 @@ export const EXPORT_DATASETS = [
   "usersRanking",
   "trend",
   "modelsRanking",
+  "modelsTrend",
   "userModels",
 ] as const;
 
@@ -71,6 +75,16 @@ const EXPORT_HEADERS: Record<ExportDataset, readonly string[]> = {
     "request_count",
   ],
   modelsRanking: ["model_name", "total_quota", "total_tokens", "request_count", "avg_cost"],
+  modelsTrend: [
+    "bucket_start",
+    "bucket_label",
+    "model_name",
+    "total_quota",
+    "total_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "request_count",
+  ],
   userModels: [
     "model_name",
     "total_quota",
@@ -187,6 +201,22 @@ export function rowsForModelsRanking(rows: ModelRankingRow[]): unknown[][] {
   ]);
 }
 
+/** 模型 × 桶明细：每模型每桶一行（与消耗分布卡同源序列，空桶含 0 值便于透视）。 */
+export function rowsForModelsTrend(series: ModelTrendSeries[]): unknown[][] {
+  return series.flatMap((model) =>
+    model.points.map((point) => [
+      point.bucketStart,
+      point.label,
+      model.modelName,
+      point.totalQuota,
+      point.totalTokens,
+      point.promptTokens,
+      point.completionTokens,
+      point.requestCount,
+    ]),
+  );
+}
+
 export function rowsForUserModels(rows: UserModelRow[]): unknown[][] {
   return rows.map((row) => [
     row.modelName,
@@ -256,6 +286,19 @@ export async function buildCsvExport(request: ExportRequest): Promise<ExportPayl
         runModelRankingQuery(range, params.limit),
       );
       return csvPayload(dataset, params, rowsForModelsRanking(data));
+    }
+    case "modelsTrend": {
+      // 与 /api/models/trend 路由同 key 同 TTL（缺省 Top 10 模型；userId 可选限定单用户）
+      const key = `${cacheKey("modelDist", {
+        start: params.start,
+        end: params.end,
+        granularity,
+        userId: params.userId,
+      })}:models=top10`;
+      const { data } = await cachedQuery(key, SCOPE_TTL_MS.modelDist, () =>
+        runModelTrendQuery(range, granularity, undefined, params.userId),
+      );
+      return csvPayload(dataset, params, rowsForModelsTrend(data.series));
     }
     case "userModels": {
       const userId = params.userId as number;

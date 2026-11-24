@@ -233,36 +233,37 @@ export interface ModelTrendLogRow {
   completion_tokens: number;
 }
 
-/** 区间 Top N 模型（按消耗降序；trend 未指定 models 时的默认维度）。 */
+/** 区间 Top N 模型（按消耗降序；trend 未指定 models 时的默认维度；`userId` 给定时限定该用户）。 */
 export function buildTopModelsQuery(
   db: ReadOnlyDatabase,
   range: QueryRange,
   limit: number = MODEL_TREND_DEFAULT_MODELS,
+  userId?: number,
 ) {
-  return db
+  const base = db
     .selectFrom("quota_data")
     .where(EXCLUDE_STAT_USERS_SQL)
-    .select([
-      "model_name",
-      sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota"),
-    ])
+    .select(["model_name", sql<number>`COALESCE(SUM(quota), 0)::bigint`.as("total_quota")])
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
-    .where("model_name", "is not", null)
+    .where("model_name", "is not", null);
+  const filtered = userId === undefined ? base : base.where("user_id", "=", userId);
+  return filtered
     .groupBy("model_name")
     .orderBy(sql`COALESCE(SUM(quota), 0)`, "desc")
     .orderBy("model_name", "asc")
     .limit(limit);
 }
 
-/** 模型 × 桶的消耗/Token 聚合。 */
+/** 模型 × 桶的消耗/Token 聚合（`userId` 给定时限定该用户）。 */
 export function buildModelTrendQuotaQuery(
   db: ReadOnlyDatabase,
   range: QueryRange,
   granularity: Granularity,
   modelNames: string[],
+  userId?: number,
 ) {
-  return db
+  const base = db
     .selectFrom("quota_data")
     .where(EXCLUDE_STAT_USERS_SQL)
     .select([
@@ -274,19 +275,20 @@ export function buildModelTrendQuotaQuery(
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
     .where("model_name", "is not", null)
-    .where("model_name", "in", modelNames)
-    .groupBy(trendBucketExpression(granularity))
-    .groupBy("model_name");
+    .where("model_name", "in", modelNames);
+  const filtered = userId === undefined ? base : base.where("user_id", "=", userId);
+  return filtered.groupBy(trendBucketExpression(granularity)).groupBy("model_name");
 }
 
-/** 模型 × 桶的请求数 + Token 拆分（logs 消费流水）。 */
+/** 模型 × 桶的请求数 + Token 拆分（logs 消费流水；`userId` 给定时限定该用户）。 */
 export function buildModelTrendRequestQuery(
   db: ReadOnlyDatabase,
   range: QueryRange,
   granularity: Granularity,
   modelNames: string[],
+  userId?: number,
 ) {
-  return db
+  const base = db
     .selectFrom("logs")
     .where(EXCLUDE_STAT_USERS_SQL)
     .select([
@@ -300,9 +302,9 @@ export function buildModelTrendRequestQuery(
     .where("created_at", ">=", range.start)
     .where("created_at", "<", range.end)
     .where("model_name", "is not", null)
-    .where("model_name", "in", modelNames)
-    .groupBy(trendBucketExpression(granularity))
-    .groupBy("model_name");
+    .where("model_name", "in", modelNames);
+  const filtered = userId === undefined ? base : base.where("user_id", "=", userId);
+  return filtered.groupBy(trendBucketExpression(granularity)).groupBy("model_name");
 }
 
 /** 组装模型序列：每个模型一条等长序列，空桶补 0；顺序以 models 为准。 */
@@ -345,17 +347,18 @@ export function assembleModelTrend(
   return { series };
 }
 
-/** 执行模型趋势：未指定 models 时先取区间 Top 10；无模型返回空 series。 */
+/** 执行模型趋势：未指定 models 时先取区间 Top 10（可限定用户）；无模型返回空 series。 */
 export async function runModelTrendQuery(
   range: QueryRange,
   granularity: Granularity,
   models: string[] | undefined,
+  userId?: number,
   db: ReadOnlyDatabase = getDb(),
 ): Promise<ModelTrendResult> {
   const modelNames =
     models === undefined || models.length === 0
       ? (
-          (await buildTopModelsQuery(db, range, MODEL_TREND_DEFAULT_MODELS).execute()) as Array<{
+          (await buildTopModelsQuery(db, range, MODEL_TREND_DEFAULT_MODELS, userId).execute()) as Array<{
             model_name: string;
           }>
         ).map((row) => row.model_name)
@@ -365,10 +368,10 @@ export async function runModelTrendQuery(
 
   const buckets = trendBuckets(range.start, range.end, granularity);
   const [quotaRows, logRows] = await Promise.all([
-    buildModelTrendQuotaQuery(db, range, granularity, modelNames).execute() as Promise<
+    buildModelTrendQuotaQuery(db, range, granularity, modelNames, userId).execute() as Promise<
       ModelTrendQuotaRow[]
     >,
-    buildModelTrendRequestQuery(db, range, granularity, modelNames).execute() as Promise<
+    buildModelTrendRequestQuery(db, range, granularity, modelNames, userId).execute() as Promise<
       ModelTrendLogRow[]
     >,
   ]);

@@ -1,10 +1,11 @@
 /**
  * GET /api/models/trend —— 模型趋势（方案 §3.4）。
  *
- * 参数：`start`/`end`（必填）、`granularity=day|week|month`（缺省 day）、
- *       `models`（逗号分隔、≤10 个；缺省取区间消耗 Top 10）。
+ * 参数：`start`/`end`（必填）、`granularity=hour|day|week|month`（缺省 day）、
+ *       `models`（逗号分隔、≤10 个；缺省取区间消耗 Top 10）、`userId`（可选，限定单用户）。
  * 响应：`{ ok, data: { series: ModelTrendSeries[] }, meta: { range, granularity, cached, source } }`
  * 说明：每模型一条等长桶序列，空桶补 0；桶数上限同全局趋势（1000 → 400）。
+ *       `userId` 供用户详情页的「消耗分布 · 按模型」复用（Top 10 与桶聚合同口径限定该用户）。
  */
 import { connection } from "next/server";
 
@@ -49,10 +50,11 @@ export async function GET(request: Request): Promise<Response> {
       start: params.start,
       end: params.end,
       granularity,
+      userId: params.userId,
     })}:models=${modelTrendKeyPart(models)}`;
 
     const { data, cached } = await cachedQuery(key, SCOPE_TTL_MS.modelDist, () =>
-      runModelTrendQuery({ start: params.start, end: params.end }, granularity, models),
+      runModelTrendQuery({ start: params.start, end: params.end }, granularity, models, params.userId),
     );
 
     return ok(data, {
