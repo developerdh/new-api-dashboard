@@ -68,3 +68,6 @@ tests/load/results/
 
 # 压测哑上游构建产物（本地构建，不入库）
 tests/load/dummy-upstream-linux
+
+# OpenSpec 变更工件（本地规划用，不入库）
+openspec/
