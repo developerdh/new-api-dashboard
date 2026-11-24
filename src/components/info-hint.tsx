@@ -7,14 +7,21 @@
 import { Info } from "lucide-react";
 import { useId } from "react";
 
+import { cn } from "@/lib/utils";
+
 export interface InfoHintProps {
   /** 元素主体名，用于 aria-label（如卡片标题）。 */
   label: string;
   /** 口径说明文本。 */
   hint: string;
+  /**
+   * tooltip 水平对齐：`right`（默认）= 右缘对齐图标、向左展开——图标靠卡片右缘时用；
+   * `left` = 左缘对齐图标、向右展开——图标紧跟卡片左缘的标题时用，避免伸出卡片被裁剪。
+   */
+  align?: "left" | "right";
 }
 
-export function InfoHint({ label, hint }: InfoHintProps) {
+export function InfoHint({ label, hint, align = "right" }: InfoHintProps) {
   const hintId = useId();
 
   return (
@@ -30,7 +37,10 @@ export function InfoHint({ label, hint }: InfoHintProps) {
       <span
         id={hintId}
         role="tooltip"
-        className="pointer-events-none absolute right-0 top-full z-30 mt-1.5 w-max max-w-56 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-opacity duration-150 peer-hover:opacity-100 peer-focus-visible:opacity-100"
+        className={cn(
+          "pointer-events-none absolute top-full z-30 mt-1.5 w-max max-w-72 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-opacity duration-150 peer-hover:opacity-100 peer-focus-visible:opacity-100",
+          align === "right" ? "right-0" : "left-0",
+        )}
       >
         {hint}
       </span>
