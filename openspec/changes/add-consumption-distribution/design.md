@@ -65,16 +65,26 @@ function distributionGranularity(range: TimeRange): DistributionBucket
 - 新组件 `src/components/charts/consumption-bar.tsx`：props `{ points, unit, metric, height?, exportName?, nowSeconds? }`；`buildDistributionOption` 为导出的纯函数（单测：未来位 null、单日标签压缩、tooltip、维度切换格式化）。
 - 数据获取：两页各增一条 `useApi`——总览 `/api/trend?{range}&granularity={unit}`，用户详情 `/api/users/:id/trend?{range}&granularity={unit}`；`unit` 由 `distributionGranularity(range)` 以 `useMemo` 派生，区间变即自动重取。响应结构与趋势卡完全一致（`TrendSeries.points`）。
 - 维度切换：页内 `useState<TrendMetric>("totalQuota")` + `MetricSwitch options={TREND_METRICS}`（与热力图/排行的既有模式一致）；总计与柱高同源于 `points[metric]`。
-- 布局：总览「消耗分布 | 消耗趋势」、用户详情「消耗分布 | 使用趋势」各为一个 `grid gap-4 lg:grid-cols-2`，趋势卡由通栏改半宽。
+- 布局：消耗分布卡与趋势卡各占一整行（分布在上、趋势在下），不做并排（初版并排，依维护者反馈改整行）。
+- 数值单位：纵轴、悬停、总计与所选维度同单位——额度统一 `formatQuota`（$），请求数/Token 用紧凑数字（初版纵轴误用紧凑数字压缩 quota 原值，出现「50万」刻度，已修正）。
 - 副标题注明分桶单位与口径：「按小时 · 东八区 / 按天 / 按周」，提示 `quota_data` ≤ 5 分钟延迟（今日末尾小时可能偏小）。
 - 导出：`ChartExportButton`（HTML 单图，`exportName` 分别为 `overview-distribution` / `user-distribution`）；CSV 不做（proposal 已排除）。
 - 卡片标题「消耗分布」与用户详情现有「模型消耗分布」饼图不冲突，不改后者。
+- overlay 开合防抖动（第四/五轮反馈）：`html` 加 `scrollbar-gutter: stable`（保宽度）；导出下拉菜单与四个 Dialog 改 `modal={false}`（与 dashcam 日期选择器同款口径）——Radix 模态锁滚动会让滚动条本体消失再出现，非模态不锁滚动，滚动条全程保留；代价是弹窗打开时背景可滚动、无焦点圈定，内部看板可接受。
 
 ### D6: 文档同步（红线 5：`docs/方案.md` 修改须维护者批准）
 
 实现合入前在会话中请求批准，批准后一次改到位：§3.2 统计维度补消耗分布；§4 参数表 `granularity` 枚举与 API 说明；§7.1 页面结构改为并排布局描述；§7.2 图表类型表加「消耗分布 | 柱状图」行。`CHANGELOG.md` 未发布节加条目。`AGENTS.md` 文档职责表不变（`方案.md` 仍是唯一权威设计；OpenSpec 变更工件是过程资产）。
 
-### D7: 测试策略
+### D7: 按模型分段（维护者反馈追加，原为 Out of scope）
+
+- **数据源**：复用 `/api/models/trend`（桶 × 模型序列，`granularity=hour` 已贯通）。全局直接调用；用户详情为其增加可选 `userId` 过滤——`buildTopModelsQuery` / `buildModelTrendQuotaQuery` / `buildModelTrendRequestQuery` 三个构建器追加可选 `user_id = $n` 条件，路由把 `params.userId` 传入执行层并加入缓存 key（`cacheKey` 本就支持 userId 段）。调用签名追加第 4 参，既有路由测试的 `toHaveBeenCalledWith` 断言同步更新（契约变化，非迁就用例）。
+- **渲染**：`ConsumptionBar` 接收 `modelSeries`——每模型一条 `stack` 同名柱序列 + 图例（scroll）；「其他」段 = 该桶合计（主趋势序列）− Σ模型分段（`Math.max(0, …)`），按 `bucketStart` 对齐两条序列；未到小时整桶渲染 null；模型名来自库内 `model_name`，进 tooltip（HTML）必须 `escapeHtml`。
+- **展示方式**：固定按模型堆叠（第二轮反馈：去掉「按模型 | 合计」切换，初版的 mode 参数已移除）；模型序列未到达时组件内部回落为合计单序列（`buildDistributionOption` 保留为回落路径）。
+- **口径说明**：分桶单位/东八区/延迟/单位说明收进标题旁 `InfoHint`（悬浮展示），不平铺在图表上方（第二轮反馈）。
+- **备选**：为用户详情新建 `/api/users/:id/models/trend` 端点——多一套路由/缓存/校验样板，且公共参数 `userId` 校验现成，弃。
+
+### D8: 测试策略（反馈轮追加项见 tasks 5.x）
 
 - `src/lib/time-range.test.ts`：`distributionGranularity` 阈值边界（1 日 / 2 日 / 3 日、92 日 / 93 日、自定义非整日起点）。
 - `src/server/queries/__tests__/trend.test.ts`：`hour` 桶序列（首桶对齐自然小时、`end` 排他含 23:00 桶）、`bucketLabel`、`shiftBucket`、SQL 编译含 `DATE_TRUNC('hour',…)`、缓存 key 含 `hour` 段；**注意**：既有「granularity 非法 → 400」用例若以 `hour` 作非法样本，须换成其他非法值（该用例语义不变，样本值过时）。
