@@ -60,7 +60,8 @@ export function InactiveUsersCard({
     prevRange === undefined ? "紧邻本期的等长周期" : formatDateRange(prevRange.start, prevRange.end);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    // 非模态：不锁定页面滚动，滚动条不消失
+    <Dialog modal={false} open={open} onOpenChange={setOpen}>
       <Card className="gap-3 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3 px-5">
           <div className="flex flex-col gap-0.5">

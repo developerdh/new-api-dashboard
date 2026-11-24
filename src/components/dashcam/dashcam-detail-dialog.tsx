@@ -221,7 +221,9 @@ export function DashcamDetailDialog({
   const highlight = keywordInput.trim();
 
   return (
+    // 非模态：不锁定页面滚动，滚动条不消失
     <Dialog
+      modal={false}
       open={open}
       onOpenChange={(next) => {
         if (!next) onClose();

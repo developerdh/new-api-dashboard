@@ -413,7 +413,9 @@ export function DashcamThreadDialog({
   const lastIndex = turns.length === 0 ? 0 : (turns.at(-1)?.index ?? 0);
 
   return (
+    // 非模态：不锁定页面滚动，滚动条不消失
     <Dialog
+      modal={false}
       open={conversation !== null}
       onOpenChange={(next) => {
         if (!next) onClose();

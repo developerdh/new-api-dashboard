@@ -102,7 +102,8 @@ export function ChartExportButton({
   const menuLabel = label === "导出 HTML" ? "导出" : label;
 
   return (
-    <DropdownMenu>
+    // 非模态：不锁定页面滚动，滚动条不消失（与 dashcam 日期选择器同款口径）
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
