@@ -14,7 +14,7 @@ vi.mock("@/server/services/stats.service", async (importOriginal) => {
 
 vi.mock("@/server/queries/model", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/queries/model")>();
-  return { ...actual, runModelRankingQuery: vi.fn() };
+  return { ...actual, runModelRankingQuery: vi.fn(), runModelTrendQuery: vi.fn() };
 });
 
 vi.mock("@/server/queries/user", async (importOriginal) => {
@@ -25,7 +25,7 @@ vi.mock("@/server/queries/user", async (importOriginal) => {
 import { GET } from "@/app/api/export/csv/route";
 import { clearCache } from "@/server/cache";
 import { QueryValidationError } from "@/server/queries/common";
-import { runModelRankingQuery } from "@/server/queries/model";
+import { runModelRankingQuery, runModelTrendQuery } from "@/server/queries/model";
 import { runUserModelsQuery } from "@/server/queries/user";
 import { getTrend, getUserRanking } from "@/server/services/stats.service";
 import {
@@ -36,6 +36,7 @@ import {
   exportFilename,
   resolveExportRequest,
   rowsForModelsRanking,
+  rowsForModelsTrend,
   rowsForTrend,
   rowsForUserModels,
   rowsForUsersRanking,
@@ -53,6 +54,7 @@ const T1 = T0 + 86_400;
 const trendUser = vi.mocked(getUserRanking);
 const trendLoader = vi.mocked(getTrend);
 const modelRankingLoader = vi.mocked(runModelRankingQuery);
+const modelTrendLoader = vi.mocked(runModelTrendQuery);
 const userModelsLoader = vi.mocked(runUserModelsQuery);
 
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -148,7 +150,7 @@ describe("CSV 转义与流式输出", () => {
 });
 
 describe("行映射与文件名", () => {
-  it("四类数据集行顺序与 API 字段一致", () => {
+  it("五类数据集行顺序与 API 字段一致", () => {
     expect(
       rowsForUsersRanking([
         {
@@ -196,6 +198,25 @@ describe("行映射与文件名", () => {
     ).toEqual([["gpt-4o", 10, 20, 4, 2.5]]);
 
     expect(
+      rowsForModelsTrend([
+        {
+          modelName: "gpt-4o",
+          points: [
+            {
+              bucketStart: T0,
+              label: "2026-11-10",
+              totalQuota: 1,
+              totalTokens: 2,
+              promptTokens: 3,
+              completionTokens: 4,
+              requestCount: 5,
+            },
+          ],
+        },
+      ]),
+    ).toEqual([[T0, "2026-11-10", "gpt-4o", 1, 2, 3, 4, 5]]);
+
+    expect(
       rowsForUserModels([
         {
           modelName: "gpt-4o",
@@ -217,7 +238,13 @@ describe("行映射与文件名", () => {
 
 describe("resolveExportRequest：数据集与参数校验", () => {
   it("dataset 必填且在枚举内", () => {
-    expect(EXPORT_DATASETS).toEqual(["usersRanking", "trend", "modelsRanking", "userModels"]);
+    expect(EXPORT_DATASETS).toEqual([
+      "usersRanking",
+      "trend",
+      "modelsRanking",
+      "modelsTrend",
+      "userModels",
+    ]);
 
     for (const query of [
       `start=${T0}&end=${T1}`,
@@ -390,6 +417,47 @@ describe("GET /api/export/csv", () => {
     expect(userModels.status).toBe(200);
     expect(await userModels.text()).toContain("gpt-4o,10,300,100,200,0.3333,0.6667");
     expect(userModelsLoader).toHaveBeenCalledWith(7, { start: T0, end: T1 });
+  });
+
+  it("modelsTrend：消耗分布同口径（桶 × 模型明细），粒度透传、userId 限定", async () => {
+    modelTrendLoader.mockResolvedValue({
+      series: [
+        {
+          modelName: "deepseek-flash",
+          points: [
+            {
+              bucketStart: T0,
+              label: "11-10 00:00",
+              totalQuota: 11,
+              totalTokens: 22,
+              promptTokens: 3,
+              completionTokens: 19,
+              requestCount: 7,
+            },
+          ],
+        },
+      ],
+    });
+
+    const global_ = await GET(
+      request(`dataset=modelsTrend&start=${T0}&end=${T1}&granularity=hour`, "198.51.100.4"),
+    );
+    expect(global_.status).toBe(200);
+    const text = await global_.text();
+    expect(text).toContain("bucket_start,bucket_label,model_name");
+    expect(text).toContain(`${T0},11-10 00:00,deepseek-flash,11,22,3,19,7`);
+    expect(modelTrendLoader).toHaveBeenCalledWith(
+      { start: T0, end: T1 },
+      "hour",
+      undefined,
+      undefined,
+    );
+
+    const scoped = await GET(
+      request(`dataset=modelsTrend&start=${T0}&end=${T1}&granularity=hour&userId=3`, "198.51.100.5"),
+    );
+    expect(scoped.status).toBe(200);
+    expect(modelTrendLoader).toHaveBeenCalledWith({ start: T0, end: T1 }, "hour", undefined, 3);
   });
 
   it("第 11 次请求（同 IP / 60s 窗口）返回 429 rate_limited", async () => {
