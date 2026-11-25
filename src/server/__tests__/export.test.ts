@@ -460,6 +460,21 @@ describe("GET /api/export/csv", () => {
     expect(modelTrendLoader).toHaveBeenCalledWith({ start: T0, end: T1 }, "hour", undefined, 3);
   });
 
+  it("modelsTrend 桶数超上限 → 400（issues.path=range，不触达执行层）", async () => {
+    // hour 粒度下 1002 小时 > MAX_TREND_BUCKETS；路由层不校验导出，服务内自行拦截
+    const end = T0 + 1_002 * 3_600;
+    const response = await GET(
+      request(`dataset=modelsTrend&start=${T0}&end=${end}&granularity=hour`, "198.51.100.6"),
+    );
+    expect(response.status).toBe(400);
+    expect(
+      ((await response.json()) as { error: { issues?: Array<{ path: string }> } }).error.issues?.some(
+        (issue) => issue.path === "range",
+      ),
+    ).toBe(true);
+    expect(modelTrendLoader).not.toHaveBeenCalled();
+  });
+
   it("第 11 次请求（同 IP / 60s 窗口）返回 429 rate_limited", async () => {
     trendUser.mockResolvedValue({ data: { rows: [] }, cached: false });
     const ip = "192.0.2.55";

@@ -22,12 +22,14 @@ import {
 } from "@/server/queries/common";
 import {
   MODEL_RANKING_MAX_LIMIT,
+  modelTrendKeyPart,
   runModelRankingQuery,
   runModelTrendQuery,
   type ModelRankingRow,
   type ModelTrendSeries,
 } from "@/server/queries/model";
 import { runUserModelsQuery, type UserModelRow, type UserRankingRow } from "@/server/queries/user";
+import { MAX_TREND_BUCKETS, trendBuckets } from "@/server/queries/trend";
 import type { TrendPoint } from "@/server/queries/trend";
 import { getTrend, getUserRanking } from "@/server/services/stats.service";
 
@@ -288,13 +290,23 @@ export async function buildCsvExport(request: ExportRequest): Promise<ExportPayl
       return csvPayload(dataset, params, rowsForModelsRanking(data));
     }
     case "modelsTrend": {
-      // 与 /api/models/trend 路由同 key 同 TTL（缺省 Top 10 模型；userId 可选限定单用户）
+      // 与 /api/models/trend 路由同校验：桶数超上限直接 400，避免导出静默截断
+      const buckets = trendBuckets(range.start, range.end, granularity);
+      if (buckets.length > MAX_TREND_BUCKETS) {
+        throw new QueryValidationError([
+          {
+            path: "range",
+            message: `桶数超过上限 ${MAX_TREND_BUCKETS}，请缩小范围或改用更粗粒度`,
+          },
+        ]);
+      }
+      // 与路由同 key 同 TTL（缺省 Top 10 模型；userId 可选限定单用户）
       const key = `${cacheKey("modelDist", {
         start: params.start,
         end: params.end,
         granularity,
         userId: params.userId,
-      })}:models=top10`;
+      })}:models=${modelTrendKeyPart(undefined)}`;
       const { data } = await cachedQuery(key, SCOPE_TTL_MS.modelDist, () =>
         runModelTrendQuery(range, granularity, undefined, params.userId),
       );

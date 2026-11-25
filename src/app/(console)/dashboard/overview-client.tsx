@@ -347,7 +347,13 @@ export function OverviewClient() {
                 points={distributionPoints}
                 unit={distributionUnit}
                 metric={distributionMetric}
-                modelSeries={modelTrendApi.data?.series}
+                modelSeries={
+                  // 两个接口缓存代际可能短暂错位：dataUrl 不一致（任一侧仍是旧区间）时
+                  // 暂不提供模型序列，避免堆叠段按 bucketStart 全 miss 而瞬时渲染成全「其他」
+                  modelTrendApi.dataUrl === distributionApi.dataUrl
+                    ? modelTrendApi.data?.series
+                    : undefined
+                }
                 nowSeconds={nowSeconds}
                 height={300}
                 exportName="overview-distribution"
