@@ -56,6 +56,14 @@ export function shanghaiMonthStart(epochSeconds: number): number {
   return localMonthStart - SHANGHAI_OFFSET_SECONDS;
 }
 
+/** 东八区当周周一 00:00:00（与服务端 `DATE_TRUNC('week', …)` 一致 = 周一）。 */
+export function shanghaiWeekStart(epochSeconds: number): number {
+  const dayStart = shanghaiDayStart(epochSeconds);
+  const weekday = new Date((dayStart + SHANGHAI_OFFSET_SECONDS) * 1000).getUTCDay(); // 0=周日
+  const daysSinceMonday = (weekday + 6) % 7;
+  return dayStart - daysSinceMonday * DAY_SECONDS;
+}
+
 /** 东八区自然日 `YYYY-MM-DD`（避免为一处格式化再引一份 Intl 实例）。 */
 export function shanghaiDateOf(epochSeconds: number): string {
   const local = new Date((epochSeconds + SHANGHAI_OFFSET_SECONDS) * 1000);
@@ -120,6 +128,43 @@ export function lastNDaysRange(
 ): TimeRange {
   const today = todayRange(nowSeconds);
   return { start: today.start - (days - 1) * DAY_SECONDS, end: today.end };
+}
+
+/* ------------------------------------------------------------------ */
+/* 周期对比固定窗口（周期对比卡专用，不随全局区间）                     */
+/* ------------------------------------------------------------------ */
+
+/** 周期对比卡的窗口单位。 */
+export type PeriodWindowUnit = "month" | "week";
+
+/** 月窗口覆盖的自然月数（含当前进行中的残月）。 */
+export const PERIOD_MONTHS = 6;
+/** 周窗口覆盖的自然周数（含当前进行中的残周，周一锚定）。 */
+export const PERIOD_WEEKS = 12;
+
+/**
+ * 周期对比卡的固定窗口：月 = 近 6 个自然月、周 = 近 12 个自然周，均含当前
+ * 进行中的残期，`end` 取当前时刻（残期悬停标注「截至 MM-DD」由卡片用
+ * `shanghaiDateOf(now)` 派生）。起点对齐自然期边界，与服务端
+ * `DATE_TRUNC('week'/'month', … AT TIME ZONE 'Asia/Shanghai')` 的桶边界一致；
+ * 东八区无夏令时，按本模块既有固定 +8h 偏移算法计算。
+ */
+export function periodWindowRange(
+  unit: PeriodWindowUnit,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): TimeRange {
+  if (unit === "month") {
+    const currentStart = shanghaiMonthStart(nowSeconds);
+    const local = new Date((currentStart + SHANGHAI_OFFSET_SECONDS) * 1000);
+    const start =
+      Date.UTC(local.getUTCFullYear(), local.getUTCMonth() - (PERIOD_MONTHS - 1), 1) / 1000 -
+      SHANGHAI_OFFSET_SECONDS;
+    return { start, end: nowSeconds };
+  }
+  return {
+    start: shanghaiWeekStart(nowSeconds) - (PERIOD_WEEKS - 1) * 7 * DAY_SECONDS,
+    end: nowSeconds,
+  };
 }
 
 /* ------------------------------------------------------------------ */

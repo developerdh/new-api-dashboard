@@ -23,6 +23,7 @@ import { ChartExportButton } from "@/components/charts/chart-export-button";
 import { ConsumptionBar, formatDistributionTotal } from "@/components/charts/consumption-bar";
 import { GranularitySwitch } from "@/components/charts/granularity-switch";
 import { MetricSwitch } from "@/components/charts/metric-switch";
+import { PeriodComparisonChart } from "@/components/charts/period-comparison";
 import { TREND_METRICS, TrendLine, type TrendMetric } from "@/components/charts/trend-line";
 import { UserRankingBar } from "@/components/charts/user-ranking-bar";
 import { TimeRangePicker } from "@/components/layout/time-range-picker";
@@ -52,10 +53,12 @@ import {
   lastNDaysRange,
   nowEpochSeconds,
   parseGranularity,
+  periodWindowRange,
   resolveRangeFromParams,
+  type PeriodWindowUnit,
 } from "@/lib/time-range";
 import { primaryUserLabel, secondaryUserLabel } from "@/lib/user-label";
-import { useApi } from "@/lib/use-api";
+import { sameQueryGeneration, useApi } from "@/lib/use-api";
 import type { InactiveUserRow, InactiveUsersSnapshot } from "@/server/queries/inactive";
 import type { ModelTrendResult } from "@/server/queries/model";
 import type { OverviewSnapshot } from "@/server/queries/overview";
@@ -93,6 +96,8 @@ export function OverviewClient() {
   const [heatMetric, setHeatMetric] = useState<TrendMetric>("totalQuota");
   const [compare, setCompare] = useState<"prev" | "yoy">("prev");
   const [rankingOpen, setRankingOpen] = useState(false);
+  const [periodUnit, setPeriodUnit] = useState<PeriodWindowUnit>("month");
+  const [periodMetric, setPeriodMetric] = useState<TrendMetric>("totalQuota");
 
   const query = `start=${range.start}&end=${range.end}`;
   const overviewApi = useApi<OverviewSnapshot>(`/api/overview?${query}`);
@@ -124,6 +129,37 @@ export function OverviewClient() {
   const heatApi = useApi<TrendSeries>(
     `/api/trend?start=${heatRange.start}&end=${heatRange.end}&granularity=day`,
   );
+
+  // 周期对比卡：固定窗口（近 6 自然月 / 近 12 自然周）不随全局区间；
+  // 月/周两窗口的合计+模型序列并行预取（各 6/12 桶，响应体极小），切窗零延迟；
+  // 基准 now 挂载时取一次（残期「截至 MM-DD」标注用，模式同热力图）
+  const periodNow = useMemo(() => nowEpochSeconds(), []);
+  const periodMonthWindow = useMemo(() => periodWindowRange("month", periodNow), [periodNow]);
+  const periodWeekWindow = useMemo(() => periodWindowRange("week", periodNow), [periodNow]);
+  const monthTotalsApi = useApi<TrendSeries>(
+    `/api/trend?start=${periodMonthWindow.start}&end=${periodMonthWindow.end}&granularity=month`,
+  );
+  const monthModelsApi = useApi<ModelTrendResult>(
+    `/api/models/trend?start=${periodMonthWindow.start}&end=${periodMonthWindow.end}&granularity=month`,
+  );
+  const weekTotalsApi = useApi<TrendSeries>(
+    `/api/trend?start=${periodWeekWindow.start}&end=${periodWeekWindow.end}&granularity=week`,
+  );
+  const weekModelsApi = useApi<ModelTrendResult>(
+    `/api/models/trend?start=${periodWeekWindow.start}&end=${periodWeekWindow.end}&granularity=week`,
+  );
+
+  const periodTotalsApi = periodUnit === "month" ? monthTotalsApi : weekTotalsApi;
+  const periodModelsApi = periodUnit === "month" ? monthModelsApi : weekModelsApi;
+  const periodWindow = periodUnit === "month" ? periodMonthWindow : periodWeekWindow;
+  const periodPoints = useMemo(
+    () => periodTotalsApi.data?.points ?? [],
+    [periodTotalsApi.data?.points],
+  );
+  // 与消耗分布卡同款守卫：合计与模型序列查询代错位（任一侧仍是旧区间）时回落纯合计
+  const periodModelSeries = sameQueryGeneration(periodModelsApi.dataUrl, periodTotalsApi.dataUrl)
+    ? periodModelsApi.data?.series
+    : undefined;
 
   const trendPoints = useMemo(() => trendApi.data?.points ?? [], [trendApi.data?.points]);
   const dailyPoints = useMemo(
@@ -305,6 +341,76 @@ export function OverviewClient() {
         <Card className="gap-3 py-5">
           <div className="flex flex-wrap items-center justify-between gap-2 px-5">
             <div className="flex items-center gap-1.5">
+              <h2 className="text-sm font-semibold">周期对比</h2>
+              <InfoHint
+                label="周期对比"
+                align="left"
+                hint="固定窗口不随顶部时间区间变化：月 = 近 6 个自然月、周 = 近 12 个自然周（周一锚定），均含进行中的残期（tooltip 标注「截至」）；数据起点之前的期按 0 展示；柱顶 ▲/▼ 为相对上期的环比，按整桶合计计算（模型分段不标注）。"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-0.5" role="group" aria-label="周期窗口">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={periodUnit === "month" ? "secondary" : "ghost"}
+                  aria-pressed={periodUnit === "month"}
+                  data-testid="period-window-month"
+                  onClick={() => setPeriodUnit("month")}
+                >
+                  月
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={periodUnit === "week" ? "secondary" : "ghost"}
+                  aria-pressed={periodUnit === "week"}
+                  data-testid="period-window-week"
+                  onClick={() => setPeriodUnit("week")}
+                >
+                  周
+                </Button>
+              </div>
+              <MetricSwitch
+                options={TREND_METRICS}
+                value={periodMetric}
+                onChange={setPeriodMetric}
+                label="周期对比统计维度"
+              />
+              <ChartExportButton
+                exportName="period-comparison"
+                title="周期对比"
+                csvHref={`/api/export/csv?dataset=modelsTrend&start=${periodWindow.start}&end=${periodWindow.end}&granularity=${periodUnit}`}
+                csvLabel="对比明细"
+              />
+            </div>
+          </div>
+          <div className="px-5">
+            <SectionBody
+              loading={periodTotalsApi.loading || periodModelsApi.loading}
+              error={periodTotalsApi.error ?? periodModelsApi.error}
+              onRetry={() => {
+                periodTotalsApi.refresh();
+                periodModelsApi.refresh();
+              }}
+              skeletonHeight={300}
+            >
+              <PeriodComparisonChart
+                points={periodPoints}
+                modelSeries={periodModelSeries}
+                unit={periodUnit}
+                metric={periodMetric}
+                nowSeconds={periodNow}
+                height={300}
+                exportName="period-comparison"
+              />
+            </SectionBody>
+          </div>
+        </Card>
+
+        <Card className="gap-3 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5">
+            <div className="flex items-center gap-1.5">
               <h2 className="text-sm font-semibold">消耗分布</h2>
               <InfoHint
                 label="消耗分布"
@@ -348,9 +454,9 @@ export function OverviewClient() {
                 unit={distributionUnit}
                 metric={distributionMetric}
                 modelSeries={
-                  // 两个接口缓存代际可能短暂错位：dataUrl 不一致（任一侧仍是旧区间）时
+                  // 两个接口查询代可能短暂错位：请求串不一致（任一侧仍是旧区间）时
                   // 暂不提供模型序列，避免堆叠段按 bucketStart 全 miss 而瞬时渲染成全「其他」
-                  modelTrendApi.dataUrl === distributionApi.dataUrl
+                  sameQueryGeneration(modelTrendApi.dataUrl, distributionApi.dataUrl)
                     ? modelTrendApi.data?.series
                     : undefined
                 }
@@ -398,6 +504,7 @@ export function OverviewClient() {
                 points={trendPoints}
                 comparePoints={trendApi.data?.compareSeries}
                 metric={trendMetric}
+                compareMode={compare}
                 height={300}
                 exportName="dashboard-trend"
               />

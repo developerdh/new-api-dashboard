@@ -23,6 +23,8 @@
 | `overview-ranking-view-all` | 「查看全部」按钮 | 打开用户排行弹窗（进入用户详情的入口） | T2 |
 | `overview-ranking-dialog` | 排行弹窗容器 | 断言弹窗渲染、按用户名筛行 | T2 |
 | `overview-ranking-user-link`（多个） | 弹窗内用户详情链接 | 点击进入 `/users/[id]` | T2→T3 |
+| `period-window-month` | 「周期对比」卡「月」窗口按钮 | 切换到近 6 个自然月窗口 | 暂无（预留） |
+| `period-window-week` | 「周期对比」卡「周」窗口按钮 | 切换到近 12 个自然周窗口 | 暂无（预留） |
 
 ## 会话卡片 / 独立列表页（共用组件）
 
