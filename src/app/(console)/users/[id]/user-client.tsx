@@ -51,7 +51,7 @@ import {
   parseGranularity,
   resolveRangeFromParams,
 } from "@/lib/time-range";
-import { useApi } from "@/lib/use-api";
+import { sameQueryGeneration, useApi } from "@/lib/use-api";
 import { primaryUserLabel, secondaryUserLabel } from "@/lib/user-label";
 import type { ModelTrendResult } from "@/server/queries/model";
 import type { UserOverviewSnapshot } from "@/server/queries/user";
@@ -444,13 +444,13 @@ export function UserClient({ userId }: { userId: string }) {
               points={distributionPoints}
               unit={distributionUnit}
               metric={distributionMetric}
-              modelSeries={
-                // 两个接口缓存代际可能短暂错位：dataUrl 不一致（任一侧仍是旧区间）时
-                // 暂不提供模型序列，避免堆叠段按 bucketStart 全 miss 而瞬时渲染成全「其他」
-                modelTrendApi.dataUrl === distributionApi.dataUrl
-                  ? modelTrendApi.data?.series
-                  : undefined
-              }
+                modelSeries={
+                  // 两个接口查询代可能短暂错位：请求串不一致（任一侧仍是旧区间）时
+                  // 暂不提供模型序列，避免堆叠段按 bucketStart 全 miss 而瞬时渲染成全「其他」
+                  sameQueryGeneration(modelTrendApi.dataUrl, distributionApi.dataUrl)
+                    ? modelTrendApi.data?.series
+                    : undefined
+                }
               nowSeconds={nowSeconds}
               height={280}
               exportName="user-distribution"

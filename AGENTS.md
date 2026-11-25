@@ -11,7 +11,8 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 | `docs/deployment.md` | 构建、打包、部署与回滚 |
 | `docs/troubleshooting.md` | 常见问题排查（按现象索引，含反代与登录问题） |
 | `docs/nginx.example.conf` | 反向代理参考配置（`Host` 必须 `$http_host`） |
-| `docs/dev-rules.md` | 跨功能开发规则（e2e 定位标注、执行纪律、版本命名等，按编号扩展） |
+| `docs/dev-rules.md` | 跨功能开发规则（e2e 定位标注、执行纪律、版本命名、统计清单同步等，按编号扩展） |
+| `docs/stats-inventory.md` | 统计能力清单（已支持统计的卡片 / 维度 / 指标 / 口径速查，随统计变更同步，见 R4） |
 | `docs/dashcam/` | 提示词与响应采集（new-api-dashcam）的背景、设计、部署与决策 |
 | `SECURITY.md` | 漏洞报告渠道与部署安全前提 |
 | `CONTRIBUTING.md` | 开发环境、提交规范、代码红线与 PR 流程 |
@@ -41,11 +42,12 @@ New API 用户使用量统计看板：Next.js（App Router）+ TypeScript 全栈
 
 ## 开发规则（agent 与开发者必须遵守）
 
-跨功能开发规则统一收录于 [`docs/dev-rules.md`](docs/dev-rules.md)（按编号扩展，当前含 R1–R3），执行任何任务前必须阅读并遵守，包括但不限于：
+跨功能开发规则统一收录于 [`docs/dev-rules.md`](docs/dev-rules.md)（按编号扩展，当前含 R1–R4），执行任何任务前必须阅读并遵守，包括但不限于：
 
 - **R1 e2e 定位标注**：会话看板可交互 UI 元素须设置 `data-testid`，同提交同步 `tests/e2e/TESTIDS.md` 映射清单；
 - **R2 e2e 执行纪律**：正式执行只记录错误与原因、输出不入库的报告与修复建议，**不得自动修复**；仅脚本开发期可直接修改；
-- **R3 版本命名**：开发期制品用 `<基础版本>-dev.<序号>`，只有发布时才改制品版本号。
+- **R3 版本命名**：开发期制品用 `<基础版本>-dev.<序号>`，只有发布时才改制品版本号；
+- **R4 统计能力清单同步**：新增 / 调整 / 下线统计卡片、图表或指标时，同一次提交更新 `docs/stats-inventory.md`。
 
 ## Git 约定
 

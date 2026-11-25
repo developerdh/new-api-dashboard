@@ -28,6 +28,20 @@ interface ApiEnvelope<T> {
   error?: ApiErrorPayload;
 }
 
+/**
+ * 两个 useApi 产出的 data 是否来自同一查询代：`?` 后请求串一致（同区间/粒度等参数）
+ * 且双方都已完成至少一次成功请求。
+ *
+ * 注意不能用 dataUrl 整体比较——不同端点路径（如 `/api/trend` 与 `/api/models/trend`）
+ * 的 URL 永不相等，整体相等判断会恒 false（曾导致按模型堆叠静默回落为纯合计）。
+ */
+export function sameQueryGeneration(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  const queryA = a.slice(a.indexOf("?") + 1);
+  if (queryA === "" || queryA === a) return false;
+  return queryA === b.slice(b.indexOf("?") + 1);
+}
+
 export interface UseApiOptions {
   /** 轮询间隔（毫秒）；0/未设置 = 不轮询。 */
   refetchInterval?: number;

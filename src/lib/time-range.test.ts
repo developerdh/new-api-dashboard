@@ -4,15 +4,19 @@ import { describe, expect, it } from "vitest";
 import {
   DAY_SECONDS,
   GRANULARITIES,
+  PERIOD_MONTHS,
+  PERIOD_WEEKS,
   PRESETS,
   distributionGranularity,
   lastNDaysRange,
   parseEpochSeconds,
   parseGranularity,
+  periodWindowRange,
   presetRange,
   resolveRangeFromParams,
   shanghaiDayStart,
   shanghaiMonthStart,
+  shanghaiWeekStart,
   todayRange,
 } from "@/lib/time-range";
 
@@ -31,6 +35,17 @@ describe("上海自然日/月边界", () => {
   it("当月 1 日 00:00", () => {
     expect(shanghaiMonthStart(NOW)).toBe(NOV1);
     expect(shanghaiMonthStart(NOV1)).toBe(NOV1);
+  });
+
+  it("当周周一 00:00（与服务端 DATE_TRUNC('week') 口径一致）", () => {
+    // 2026-11-11 是周三 → 本周周一为 2026-11-09 00:00 +08
+    expect(shanghaiWeekStart(NOW)).toBe(Date.parse("2026-11-09T00:00:00+08:00") / 1000);
+    // 周日归到前一周周一：2026-11-15（周日）→ 2026-11-09
+    const sunday = Date.parse("2026-11-15T23:00:00+08:00") / 1000;
+    expect(shanghaiWeekStart(sunday)).toBe(Date.parse("2026-11-09T00:00:00+08:00") / 1000);
+    // 周一当天归到当天
+    const monday = Date.parse("2026-11-09T10:00:00+08:00") / 1000;
+    expect(shanghaiWeekStart(monday)).toBe(Date.parse("2026-11-09T00:00:00+08:00") / 1000);
   });
 });
 
@@ -124,5 +139,56 @@ describe("消耗分布分桶（distributionGranularity）", () => {
     // 近 30 天预设 → day；自定义半年 → week
     expect(distributionGranularity(presetRange("30d", NOW))).toBe("day");
     expect(distributionGranularity({ start: NOV1 - 184 * DAY_SECONDS, end })).toBe("week");
+  });
+});
+
+describe("周期对比固定窗口（periodWindowRange）", () => {
+  it("月窗口 = 近 6 个自然月（含当前残月），end = now", () => {
+    const range = periodWindowRange("month", NOW);
+    expect(range.end).toBe(NOW);
+    expect(range.start).toBe(Date.parse("2026-06-01T00:00:00+08:00") / 1000);
+    expect(PERIOD_MONTHS).toBe(6);
+  });
+
+  it("月窗口跨年：3 月 → 前一年 10 月 1 日", () => {
+    const march = Date.parse("2026-03-15T12:00:00+08:00") / 1000;
+    expect(periodWindowRange("month", march).start).toBe(
+      Date.parse("2025-10-01T00:00:00+08:00") / 1000,
+    );
+    // 月末时刻不影响起点（起点只取决于所在自然月）
+    const monthEnd = Date.parse("2026-03-31T23:00:00+08:00") / 1000;
+    expect(periodWindowRange("month", monthEnd).start).toBe(
+      Date.parse("2025-10-01T00:00:00+08:00") / 1000,
+    );
+  });
+
+  it("周窗口 = 近 12 个自然周（周一锚定，含当前残周），end = now", () => {
+    const range = periodWindowRange("week", NOW);
+    expect(range.end).toBe(NOW);
+    // 本周周一 2026-11-09 前推 11 周 → 2026-08-24 00:00 +08
+    expect(range.start).toBe(Date.parse("2026-08-24T00:00:00+08:00") / 1000);
+    expect(PERIOD_WEEKS).toBe(12);
+  });
+
+  it("窗口内桶数与服务端分桶枚举一致（6 月桶 / 12 周桶）", () => {
+    // 按服务端桶边界口径枚举：月窗口首桶对齐自然月 1 日，逐月 +1 共 6 桶
+    const monthStarts: number[] = [];
+    let cursor = periodWindowRange("month", NOW).start;
+    while (cursor < NOW) {
+      monthStarts.push(cursor);
+      const local = new Date((cursor + 8 * 3_600) * 1000);
+      cursor =
+        Date.UTC(local.getUTCFullYear(), local.getUTCMonth() + 1, 1) / 1000 - 8 * 3_600;
+    }
+    expect(monthStarts.length).toBe(6);
+
+    // 周窗口：周一锚定，逐周 +7 天共 12 桶
+    const weekStarts: number[] = [];
+    let week = periodWindowRange("week", NOW).start;
+    while (week < NOW) {
+      weekStarts.push(week);
+      week += 7 * DAY_SECONDS;
+    }
+    expect(weekStarts.length).toBe(12);
   });
 });
