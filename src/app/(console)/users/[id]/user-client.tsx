@@ -94,13 +94,14 @@ export function UserClient({ userId }: { userId: string }) {
   const distributionApi = useApi<TrendSeries>(
     `${basePath}/trend?${query}&granularity=${distributionUnit}`,
   );
-  // 按模型展示的模型序列（限定该用户；「其他」由用户趋势合计在组件内做差额）
+  // 按模型展示的模型序列（限定该用户；「其他」由用户趋势合计在组件内做差额）；
+  // 非法 id（页面渲染错误态）时不发请求
   const numericUserId = Number(userId);
-  const modelTrendApi = useApi<ModelTrendResult>(
-    `/api/models/trend?${query}&granularity=${distributionUnit}${
-      Number.isSafeInteger(numericUserId) && numericUserId > 0 ? `&userId=${numericUserId}` : ""
-    }`,
-  );
+  const modelTrendUrl =
+    Number.isSafeInteger(numericUserId) && numericUserId > 0
+      ? `/api/models/trend?${query}&granularity=${distributionUnit}&userId=${numericUserId}`
+      : null;
+  const modelTrendApi = useApi<ModelTrendResult>(modelTrendUrl);
   // 「未到」判定基准：切区间时刷新（页面停留期间不自动轮询，与其它卡一致）
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 故意依赖区间：换区间时重取 now，避免把已发生小时误判为未来
   const nowSeconds = useMemo(() => nowEpochSeconds(), [range.start, range.end]);
@@ -443,7 +444,13 @@ export function UserClient({ userId }: { userId: string }) {
               points={distributionPoints}
               unit={distributionUnit}
               metric={distributionMetric}
-              modelSeries={modelTrendApi.data?.series}
+              modelSeries={
+                // 两个接口缓存代际可能短暂错位：dataUrl 不一致（任一侧仍是旧区间）时
+                // 暂不提供模型序列，避免堆叠段按 bucketStart 全 miss 而瞬时渲染成全「其他」
+                modelTrendApi.dataUrl === distributionApi.dataUrl
+                  ? modelTrendApi.data?.series
+                  : undefined
+              }
               nowSeconds={nowSeconds}
               height={280}
               exportName="user-distribution"
